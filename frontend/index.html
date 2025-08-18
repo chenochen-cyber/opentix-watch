@@ -1,57 +1,91 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
   <title>售票監測工具</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
+    .tab { display: inline-block; margin-right: 10px; padding: 5px 10px; border: 1px solid #ccc; cursor: pointer; }
+    .tab.active { background: #4caf50; color: white; }
     .item { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
     .start-btn { background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; }
     .start-btn:hover { background: #45a049; }
-    .results { margin-top: 10px; }
+    .results { margin-top: 10px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <h1>售票監測工具</h1>
 
+  <div>
+    <input type="text" id="alias" placeholder="輸入戲名">
+    <input type="text" id="url" placeholder="輸入售票網址，多個用逗號分隔">
+    <select id="frequency">
+      <option value="minute">每分鐘</option>
+      <option value="hour">每小時</option>
+      <option value="day">每天</option>
+    </select>
+    <button onclick="addItem()">新增</button>
+  </div>
+
+  <div id="tabs"></div>
   <div id="items"></div>
 
   <script>
-    // ⚠️ 記得改成你的 Render 網址
     const API = "https://opentix-watch-1.onrender.com/api/status";
+    const items = [];
+    let activeIndex = 0;
 
-    // 假資料，實際上應該來自使用者輸入或保存的設定
-    const items = [
-      { alias: "戲劇A", urls: "https://www.opentix.life/event/1234567890" },
-      { alias: "戲劇B", urls: "https://www.opentix.life/event/9876543210" }
-    ];
+    function addItem() {
+      const alias = document.getElementById("alias").value || `戲劇${items.length + 1}`;
+      const urls = document.getElementById("url").value;
+      const frequency = document.getElementById("frequency").value;
+      items.push({ alias, urls, frequency });
+      renderTabs();
+      renderItems();
+    }
+
+    function renderTabs() {
+      const tabs = document.getElementById("tabs");
+      tabs.innerHTML = "";
+      items.forEach((item, index) => {
+        const tab = document.createElement("div");
+        tab.className = "tab" + (index === activeIndex ? " active" : "");
+        tab.innerText = item.alias;
+        tab.onclick = () => {
+          activeIndex = index;
+          renderTabs();
+          renderItems();
+        };
+        tabs.appendChild(tab);
+      });
+    }
 
     function renderItems() {
       const container = document.getElementById("items");
       container.innerHTML = "";
-      items.forEach(item => {
-        const div = document.createElement("div");
-        div.className = "item";
+      if (items.length === 0) return;
 
-        const title = document.createElement("h3");
-        title.innerText = item.alias;
+      const item = items[activeIndex];
+      const div = document.createElement("div");
+      div.className = "item";
 
-        const btn = document.createElement("button");
-        btn.className = "start-btn";
-        btn.innerText = "開始";
-        // ✅ 綁定事件，點了會去呼叫後端
-        btn.addEventListener("click", () => runFetch(item));
+      const title = document.createElement("h3");
+      title.innerText = `${item.alias}（${item.frequency}）`;
 
-        const results = document.createElement("div");
-        results.className = "results";
-        results.id = `results-${item.alias}`;
+      const btn = document.createElement("button");
+      btn.className = "start-btn";
+      btn.innerText = "開始";
+      // ✅ 修正：綁定事件
+      btn.addEventListener("click", () => runFetch(item));
 
-        div.appendChild(title);
-        div.appendChild(btn);
-        div.appendChild(results);
-        container.appendChild(div);
-      });
+      const results = document.createElement("div");
+      results.className = "results";
+      results.id = `results-${item.alias}`;
+
+      div.appendChild(title);
+      div.appendChild(btn);
+      div.appendChild(results);
+      container.appendChild(div);
     }
 
     async function runFetch(item) {
@@ -75,8 +109,6 @@
         resultsDiv.innerText = "抓取失敗：" + err.message;
       }
     }
-
-    renderItems();
   </script>
 </body>
 </html>
