@@ -77,7 +77,7 @@
           </select>
         </div>
         <div>
-          <button id="add" disabled>新增並開始</button>
+          <button id="add">新增並開始</button>
         </div>
       </div>
 
@@ -119,9 +119,14 @@ const tbodyEl = tblEl.querySelector('tbody');
 const errEl = document.querySelector('#errors');
 let timers = {}; // per alias interval id
 
-aliasInput.addEventListener('input', () => {
-  addBtn.disabled = !aliasInput.value.trim();
-});
+function toggleAdd(){
+  const aliasOk = aliasInput.value.trim().length>0;
+  addBtn.disabled = !aliasOk; // 只強制需要別名，按下去再檢查網址
+}
+aliasInput.addEventListener('input', toggleAdd);
+urlsInput.addEventListener('input', toggleAdd);
+// 初始狀態：允許點擊（會在點擊時驗證）
+addBtn.disabled = false;
 
 addBtn.addEventListener('click', () => {
   const alias = aliasInput.value.trim();
