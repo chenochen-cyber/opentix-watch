@@ -1,31 +1,26 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
-from typing import Optional
-from scraper import run_once, scrape_status, scrape_event_pages
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from scraper import scrape_status as _scrape_status
 
 app = FastAPI()
 
-@app.get("/api/status")
-async def api_status(
-    url: Optional[str] = Query(None),
-    urls: Optional[str] = Query(None)
-):
-    """
-    抓取票券剩餘數資訊
-    - url: 單一網址
-    - urls: 多個網址，用逗號分隔
-    """
-    try:
-        data = await run_once(url=url, urls=urls)
-        return JSONResponse(content=data)
-    except Exception as e:
-        # 捕捉所有錯誤，避免 500，回傳清楚的錯誤訊息
-        return JSONResponse(
-            content={"results": [], "errors": [str(e)]},
-            status_code=200
-        )
+# CORS 設定
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/health")
-async def health():
-    """健康檢查用"""
-    return {"status": "ok"}
+# Render 會先打 "/" 測試服務有沒有起來
+@app.get("/")
+def home():
+    return {"message": "Service is running"}
+
+# API：檢查票券狀態
+@app.get("/api/status")
+async def api_status(targets: str):
+    # 這裡原本多了一個 headless=True，已經拿掉
+    data = _scrape_status(targets)
+    return data
