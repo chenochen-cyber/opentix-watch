@@ -143,3 +143,23 @@ async def _fetch_one(context, url: str) -> Dict[str, Any]:
         raise PWTimeout(f"Timeout while loading {url}: {e}") from e
     finally:
         await page.close()
+
+# --- 轉接舊名稱，維持與 main.py 的相容 ---
+from typing import Dict, Any, List, Union
+
+async def scrape_status(url: str) -> Dict[str, Any]:
+    """
+    舊介面相容：抓單一 URL 的狀態
+    """
+    return await run_once(url=url)
+
+async def scrape_event_pages(urls: Union[List[str], str]) -> Dict[str, Any]:
+    """
+    舊介面相容：一次抓多個 URL（list 或逗號字串都可）
+    """
+    if isinstance(urls, (list, tuple)):
+        joined = ",".join([u.strip() for u in urls if str(u).strip()])
+    else:
+        joined = str(urls).strip()
+    return await run_once(urls=joined)
+
