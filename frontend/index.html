@@ -43,8 +43,19 @@
 
     .statusbar{display:flex; gap:12px; align-items:center; margin-top:8px; color:var(--muted); font-size:12px}
     .dot{width:8px; height:8px; border-radius:999px; background:var(--ok)}
-    .dot.loading{background:var(--warn)}    /* ✅ 載入中 */
-    .dot.error{background:var(--err)}       /* ✅ 錯誤時 */
+    .dot.loading{background:var(--warn)}
+    .dot.error{background:var(--err)}
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
     .err{color:var(--err)}
     .btn-sm{background:#1f2937; color:#c7d2fe; border:1px solid #2b3550}
 
@@ -87,6 +98,7 @@
 
       <div class="statusbar">
         <span class="dot" id="liveDot"></span>
+        <span id="spinner" class="spinner" style="display:none"></span>
         <span id="status">尚未執行</span>
         <button class="btn-sm" id="refresh" style="margin-left:auto">立即更新</button>
       </div>
@@ -106,7 +118,7 @@ const API_BASE = "https://opentix-watch-1.onrender.com"; // ← 你的後端
 const API = `${API_BASE}/api/status`;
 
 /*** 狀態管理 ***/
-let state = loadState(); // { alias: { urls: string, freq: '1h'|'6h'|'24h', last: any, updatedAt: ts } }
+let state = loadState();
 let activeAlias = Object.keys(state)[0] || null;
 
 const $ = (q) => document.querySelector(q);
@@ -120,63 +132,32 @@ const tblEl = $('#tbl');
 const tbodyEl = tblEl.querySelector('tbody');
 const errEl = $('#errors');
 const liveDot = $('#liveDot');
+const spinnerEl = $('#spinner');
 const refreshBtn = $('#refresh');
-let timers = {};               // per alias interval id
-let inFlightController = null; // ✅ 取消上一個請求用
+let timers = {};
 
-/*** 工具 ***/
-function parseUrls(raw){
-  // ✅ 乾淨化：分割、去空白、去空字串、基本 URL 驗證、去重
-  const set = new Set();
-  (raw || '').split(',').map(s=>s.trim()).forEach(s=>{
-    if(!s) return;
-    try{
-      const u = new URL(s);
-      // 最少要求含 /event/，避免貼到節目總覽頁
-      if(!/\/event\//.test(u.pathname)) { /* 可視需求放寬 */ }
-      set.add(u.toString());
-    }catch{ /* 非法 URL 忽略 */ }
-  });
-  return Array.from(set);
-}
-function normalizeAlias(a){ return (a||'').trim().replace(/\s+/g,' '); }
-function labelOfFreq(v){ return v==='1h'?'每 1 小時': (v==='6h'?'每 6 小時':'每天'); }
-function freqToMs(v){ return v==='1h'? 3600_000 : (v==='6h'? 6*3600_000 : 24*3600_000); }
-function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
-function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
-function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
-function saveState(){ localStorage.setItem('opentix_watch_state', JSON.stringify(state)); }
-function loadState(){ try{ return JSON.parse(localStorage.getItem('opentix_watch_state')||'{}') }catch{ return {} } }
-function setDot(mode){   // ✅ 狀態燈
+function setDot(mode){
   liveDot.classList.remove('loading','error');
   if(mode==='loading') liveDot.classList.add('loading');
   else if(mode==='error') liveDot.classList.add('error');
 }
 
-/*** UI 初始 ***/
 function toggleAdd(){
   const aliasOk = aliasInput.value.trim().length>0;
-  addBtn.disabled = !aliasOk; // 只強制需要別名，按下去再檢查網址
+  addBtn.disabled = !aliasOk;
 }
 aliasInput.addEventListener('input', toggleAdd);
 urlsInput.addEventListener('input', toggleAdd);
 addBtn.disabled = false;
 
-/*** 新增 alias ***/
 addBtn.addEventListener('click', () => {
-  const aliasRaw = aliasInput.value;
-  const alias = normalizeAlias(aliasRaw);
-  const urlsArr = parseUrls(urlsInput.value);
+  const alias = aliasInput.value.trim();
+  const urls  = urlsInput.value.trim();
   const freq  = freqSel.value;
-
   if(!alias){ toast('請輸入別名'); return; }
-  if(urlsArr.length===0){ toast('請輸入至少一個有效的活動網址'); return; }
-
-  // ✅ 別名唯一（大小寫不敏感）
-  const hasDup = Object.keys(state).some(k => k.toLowerCase() === alias.toLowerCase());
-  if(hasDup){ toast('此別名已存在，請更換'); return; }
-
-  state[alias] = { urls: urlsArr.join(', '), freq, last:null, updatedAt:null };
+  if(!urls){ toast('請輸入至少一個活動網址'); return; }
+  if(state[alias]){ toast('此別名已存在，請更換'); return; }
+  state[alias] = { urls, freq, last:null, updatedAt:null };
   saveState();
   aliasInput.value='';
   addBtn.disabled = true;
@@ -185,7 +166,6 @@ addBtn.addEventListener('click', () => {
   runFetch(alias);
 });
 
-/*** Tabs ***/
 function renderTabs(){
   tabsEl.innerHTML = '';
   const names = Object.keys(state);
@@ -193,15 +173,15 @@ function renderTabs(){
   names.forEach(name => {
     const t = document.createElement('div');
     t.className = 'tab' + (name===activeAlias?' active':'');
-    t.innerHTML = `<span class="alias">${escapeHTML(name)}</span>
+    t.innerHTML = `<span class="alias">${name}</span>
                    <span class="badge">${labelOfFreq(state[name].freq)}</span>
-                   <svg class="close" data-alias="${escapeHTML(name)}" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-left:6px" aria-label="刪除分頁">
+                   <svg class="close" data-alias="${name}" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-left:6px">
                      <path d="M6 6l12 12M18 6L6 18" stroke="#7b88a8" stroke-width="1.6" stroke-linecap="round"/>
                    </svg>`;
     t.addEventListener('click', (e)=>{
-      const closeHit = e.target.closest('.close');
-      if(closeHit){
-        const a = closeHit.getAttribute('data-alias');
+      const target = e.target.closest('.close');
+      if(target){
+        const a = target.getAttribute('data-alias');
         removeAlias(a);
         return;
       }
@@ -209,18 +189,10 @@ function renderTabs(){
     });
     tabsEl.appendChild(t);
   });
-
-  // ✅ 讓頻率下拉與目前 active 同步顯示
-  if(activeAlias && state[activeAlias]) {
-    freqSel.value = state[activeAlias].freq;
-  }
 }
 
 function setActive(name){
-  activeAlias = name;
-  renderTabs();
-  draw(activeAlias);
-  setupTimer(activeAlias);
+  activeAlias = name; renderTabs(); draw(activeAlias); setupTimer(activeAlias);
 }
 
 function removeAlias(name){
@@ -233,10 +205,10 @@ function removeAlias(name){
   draw(activeAlias);
 }
 
-/*** 畫表格 ***/
 function draw(name){
   errEl.textContent='';
-  setDot(); // 回到正常色
+  setDot();
+  spinnerEl.style.display = 'none';
   if(!name){ statusEl.textContent='尚未建立任何監測'; tblEl.style.display='none'; return; }
   const item = state[name];
   if(!item || !item.last){
@@ -248,19 +220,18 @@ function draw(name){
   const ts = item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '';
   statusEl.textContent = `別名：${name} · 來源：${shorten(item.urls)} · 最後更新：${ts}`;
   tbodyEl.innerHTML = '';
-  if(!data || !Array.isArray(data.results) || data.results.length===0){
+  if(!data || !data.results || data.results.length===0){
     tblEl.style.display='none';
   }else{
     data.results.forEach(r=>{
-      const showText = (()=>{ try{ const u=new URL(r.url); return u.hostname + u.pathname; }catch{ return r.url; }})(); // ✅ 顯示 hostname+path
       if(!r.entries || r.entries.length===0){
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHTML(showText)}</td><td class="muted">未偵測到「剩：xxx」</td><td>—</td>`;
+        tr.innerHTML = `<td>${escapeHTML(r.url)}</td><td class="muted">未偵測到「剩：xxx」</td><td>—</td>`;
         tbodyEl.appendChild(tr);
       }else{
         r.entries.forEach(e=>{
           const tr = document.createElement('tr');
-          tr.innerHTML = `<td><a href="${r.url}" target="_blank" rel="noopener noreferrer">${escapeHTML(showText)}</a></td>
+          tr.innerHTML = `<td><a href="${r.url}" target="_blank">${new URL(r.url).hostname}</a></td>
                           <td>${e.label ? escapeHTML(e.label) : '<span class="muted">場次</span>'}</td>
                           <td><span class="tag">${escapeHTML(e.remaining)}</span></td>`;
           tbodyEl.appendChild(tr);
@@ -269,67 +240,41 @@ function draw(name){
     });
     tblEl.style.display='';
   }
-  if(Array.isArray(data.errors) && data.errors.length){
+  if(data.errors && data.errors.length){
     errEl.textContent = data.errors.map(e=>`${e.url||''} ${e.error||e}`).join(' | ');
-    setDot('error'); // ✅ 若回傳含錯誤
+    setDot('error');
   }
 }
 
-/*** 請求 ***/
 async function runFetch(name){
   const item = state[name];
   if(!item) return;
 
-  // ✅ 取消上一個請求（避免狂點或頻繁輪詢堆疊）
-  if(inFlightController) inFlightController.abort();
-  const ac = new AbortController();
-  inFlightController = ac;
-
   errEl.textContent='';
   statusEl.textContent = `正在抓取（${name}）…`;
-  setDot('loading'); // ✅ 載入燈
-
-  // ✅ 逾時保護（例如 20 秒）
-  const timeoutId = setTimeout(()=> ac.abort(), 20000);
+  setDot('loading');
+  spinnerEl.style.display = 'inline-block';
 
   try{
-    // 從 state 取乾淨過的 urls
-    const urlsArr = parseUrls(item.urls);
-    if(urlsArr.length===0) throw new Error('沒有有效的 URL');
-
-    const qs = (urlsArr.length>1)
-      ? `?urls=${encodeURIComponent(urlsArr.join(', '))}`
-      : `?url=${encodeURIComponent(urlsArr[0])}`;
-
-    const res = await fetch(`${API}${qs}`, { cache:'no-store', signal: ac.signal });
-
-    // ✅ 先檢查 res.ok，再決定用 json 或 text 解析
-    const text = await res.text();
+    const target = item.urls.includes(',') ? `${API}?urls=${encodeURIComponent(item.urls)}` : `${API}?url=${encodeURIComponent(item.urls)}`;
+    const res = await fetch(target, { cache:'no-store' });
     if(!res.ok){
-      throw new Error(`HTTP ${res.status} ${res.statusText} · ${text.slice(0,120)}`);
+      throw new Error(`HTTP ${res.status} ${res.statusText}`);
     }
-    let data;
-    try{
-      data = JSON.parse(text);
-    }catch{
-      throw new Error('回應非有效 JSON：' + text.slice(0,200));
-    }
-
+    const data = await res.json();
     item.last = data; item.updatedAt = Date.now(); saveState();
     if(name===activeAlias) draw(name);
+    setDot();
   }catch(e){
     errEl.textContent = '讀取失敗：' + (e?.message || e);
     statusEl.textContent = '讀取失敗';
-    setDot('error'); // ✅ 錯誤燈
+    setDot('error');
   }finally{
-    clearTimeout(timeoutId);
-    inFlightController = null;
+    spinnerEl.style.display = 'none';
   }
 }
 
-/*** 輪詢 ***/
 function setupTimer(name){
-  // 清掉所有舊的 interval，保持畫面上「唯一一個」分頁在輪詢
   Object.keys(timers).forEach(clearTimer);
   const item = state[name]; if(!item) return;
   const ms = freqToMs(item.freq);
@@ -337,20 +282,18 @@ function setupTimer(name){
 }
 function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
 
-/*** UI 行為補強 ***/
-// ✅ 立即更新：補掛事件
+function labelOfFreq(v){ return v==='1h'?'每 1 小時': (v==='6h'?'每 6 小時':'每天'); }
+function freqToMs(v){ return v==='1h'? 3600_000 : (v==='6h'? 6*3600_000 : 24*3600_000); }
+function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
+function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
+function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;","">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+function saveState(){ localStorage.setItem('opentix_watch_state', JSON.stringify(state)); }
+function loadState(){ try{ return JSON.parse(localStorage.getItem('opentix_watch_state')||'{}') }catch{ return {} } }
+
 refreshBtn.addEventListener('click', ()=>{
   if(!activeAlias){ toast('沒有可更新的項目'); return; }
   runFetch(activeAlias);
-});
-
-// ✅ 變更頻率：作用在當前分頁，並立即重置輪詢
-freqSel.addEventListener('change', ()=>{
-  if(!activeAlias || !state[activeAlias]) return;
-  state[activeAlias].freq = freqSel.value;
-  saveState();
-  renderTabs();          // 更新 badge
-  setupTimer(activeAlias); // 重置 interval
 });
 
 // 初始渲染
