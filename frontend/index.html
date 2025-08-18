@@ -108,16 +108,15 @@ let state = loadState(); // { alias: { urls: string, freq: '1h'|'6h'|'24h', last
 let activeAlias = Object.keys(state)[0] || null;
 
 const $ = (q) => document.querySelector(q);
-const urlsInput = $('#urls');
-const aliasInput = $('#alias');
-const freqSel = $('#freq');
-const addBtn = $('#add');
-const tabsEl = $('#tabs');
-const statusEl = $('#status');
-const tblEl = $('#tbl');
+const urlsInput = document.querySelector('#urls');
+const aliasInput = document.querySelector('#alias');
+const freqSel = document.querySelector('#freq');
+const addBtn = document.querySelector('#add');
+const tabsEl = document.querySelector('#tabs');
+const statusEl = document.querySelector('#status');
+const tblEl = document.querySelector('#tbl');
 const tbodyEl = tblEl.querySelector('tbody');
-const errEl = $('#errors');
-const refreshBtn = $('#refresh');
+const errEl = document.querySelector('#errors');
 let timers = {}; // per alias interval id
 
 aliasInput.addEventListener('input', () => {
@@ -128,15 +127,9 @@ addBtn.addEventListener('click', () => {
   const alias = aliasInput.value.trim();
   const urls  = urlsInput.value.trim();
   const freq  = freqSel.value;
-  if(!alias){
-    toast('請輸入別名'); return;
-  }
-  if(!urls){
-    toast('請輸入至少一個活動網址'); return;
-  }
-  if(state[alias]){
-    toast('此別名已存在，請更換'); return;
-  }
+  if(!alias){ toast('請輸入別名'); return; }
+  if(!urls){ toast('請輸入至少一個活動網址'); return; }
+  if(state[alias]){ toast('此別名已存在，請更換'); return; }
   state[alias] = { urls, freq, last:null, updatedAt:null };
   saveState();
   aliasInput.value='';
@@ -145,8 +138,6 @@ addBtn.addEventListener('click', () => {
   setActive(alias);
   runFetch(alias);
 });
-
-refreshBtn.addEventListener('click', () => { if(activeAlias) runFetch(activeAlias, true); });
 
 function renderTabs(){
   tabsEl.innerHTML = '';
@@ -225,7 +216,7 @@ function draw(name){
   }
 }
 
-async function runFetch(name, manual=false){
+async function runFetch(name){
   const item = state[name];
   if(!item) return;
   errEl.textContent='';
@@ -236,7 +227,6 @@ async function runFetch(name, manual=false){
     const data = await res.json();
     item.last = data; item.updatedAt = Date.now(); saveState();
     if(name===activeAlias) draw(name);
-    if(manual) toast('已更新');
   }catch(e){
     errEl.textContent = '讀取失敗：' + e;
     statusEl.textContent = '讀取失敗';
@@ -244,10 +234,9 @@ async function runFetch(name, manual=false){
 }
 
 function setupTimer(name){
-  // 清掉舊的
+  // 清掉所有舊的 interval，保持畫面上「唯一一個」分頁在輪詢
   Object.keys(timers).forEach(clearTimer);
-  const item = state[name];
-  if(!item) return;
+  const item = state[name]; if(!item) return;
   const ms = freqToMs(item.freq);
   timers[name] = setInterval(()=> runFetch(name), ms);
 }
@@ -256,10 +245,8 @@ function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete
 function labelOfFreq(v){ return v==='1h'?'每 1 小時': (v==='6h'?'每 6 小時':'每天'); }
 function freqToMs(v){ return v==='1h'? 3600_000 : (v==='6h'? 6*3600_000 : 24*3600_000); }
 function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
-function toast(msg){
-  statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400);
-}
-function escapeHTML(s){ return String(s).replace(/[&<>"]g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
+function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
 function saveState(){ localStorage.setItem('opentix_watch_state', JSON.stringify(state)); }
 function loadState(){ try{ return JSON.parse(localStorage.getItem('opentix_watch_state')||'{}') }catch{ return {} } }
