@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenTix Watch</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Noto Sans TC", "PingFang TC", "Segoe UI", Roboto, Arial, sans-serif; margin: 24px; }
+    h1 { margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    input[type="text"] { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+    button, select { padding: 8px 12px; border: 0; background: #111; color: #fff; border-radius: 10px; cursor: pointer; }
+    button.secondary { background:#444; }
+    button.ghost { background:#eee; color:#111; }
+    button:disabled { background: #888; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
+    .error { color: #b00020; margin-top: 8px; }
+    .muted { color: #666; font-size: 12px; }
+    .tag { display:inline-block; padding: 2px 6px; border-radius: 6px; background:#f2f2f2; font-size:12px; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#f2f2f2; font-size:12px; margin-left:6px; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 4px; }
+    select, input[type="number"] { padding:6px 8px; border:1px solid #ccc; border-radius:8px; background:#fff; color:#111; }
+
+    .tabs { display:flex; gap:8px; margin-top:16px; }
+    .tab { padding:6px 10px; border-radius:8px; background:#eee; color:#111; cursor:pointer; font-size:14px; }
+    .tab.active { background:#111; color:#fff; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+
+    /* 進度指示 */
+    .spinner { display:inline-block; width:16px; height:16px; border:2px solid #ccc;
+               border-top-color:#111; border-radius:50%; animation:spin 0.8s linear infinite;
+               vertical-align:middle; margin-right:6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#f2f2f2; }
+    .delta { font-size:12px; margin-left:6px; }
+    .up::before { content:"↑"; margin-right:2px; }
+    .down::before { content:"↓"; margin-right:2px; }
+    .low { background:#ffe9e9; color:#b00020; }
+  </style>
+</head>
+<body>
+  <h1>OpenTix Watch</h1>
+
+  <!-- 基本輸入與一次抓取 -->
+  <div class="row">
+    <input id="urls" type="text" placeholder="貼上一個或多個 OpenTix 活動網址，以逗號分隔" />
+    <button id="run">抓取一次</button>
+    <button id="alias" class="secondary" title="為每個 URL 設定顯示名稱">設定別名</button>
+  </div>
+
+  <!-- 監測控制 -->
+  <div class="controls">
+    <label class="muted">監測頻率
+      <select id="freq" style="margin-left:6px;">
+        <option value="0">關閉</option>
+        <option value="5">每 5 分鐘</option>
+        <option value="15">每 15 分鐘</option>
+        <option value="60">每 60 分鐘</option>
+      </select>
+    </label>
+    <button id="startStop" class="secondary">開始監測</button>
+    <button id="exportCsv" class="ghost">匯出 CSV</button>
+    <button id="clearHist" class="ghost">清除歷史</button>
+  </div>
+
+  <!-- 狀態列 -->
+  <div id="status" class="muted" style="margin-top:8px;"></div>
+  <div id="tick" class="muted" style="display:none;">已經 <span id="elapsed">0</span> 秒…</div>
+  <div id="errors" class="error"></div>
+
+  <!-- 分頁 -->
+  <div class="tabs">
+    <div class="tab active" data-tab="live">目前票況</div>
+    <div class="tab" data-tab="history">日誌／日售表</div>
+    <div class="tab" data-tab="speed">速度比較</div>
+  </div>
+
+  <!-- 面板：即時結果 -->
+  <div id="panel-live" class="panel active">
+    <table id="tbl" style="display:none">
+      <thead>
+        <tr><th>節目（別名）/ URL</th><th>場次</th><th>剩餘</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- 面板：歷史 -->
+  <div id="panel-history" class="panel">
+    <div class="muted">顯示今天的紀錄（依 URL+場次）。點「匯出 CSV」可下載全部紀錄。</div>
+    <div id="historyContainer"></div>
+  </div>
+
+  <!-- 面板：速度比較 -->
+  <div id="panel-speed" class="panel">
+    <div class="muted">以「今天」的資料估算各節目之售票速度（合計所有場次）。售出量＝上一筆剩餘 − 本筆剩餘，若為負視為 0。</div>
+    <table id="speedTbl" style="display:none; margin-top:8px;">
+      <thead><tr><th>節目（別名）/ URL</th><th>今日售出總張數</th><th>估算平均每小時</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+<script>
+const API = "http://localhost:8000/api/status";
+const KEY_CFG = "otx_cfg";
+const KEY_REC = "otx_records"; // [{url,label,remaining:number,ts:number}]
+let timer = null;
+let loadingTimer = null;
+let startAt = 0;
+
+/* -------------------- 狀態存取 -------------------- */
+function loadCfg(){
+  const d = JSON.parse(localStorage.getItem(KEY_CFG) || "{}");
+  return {
+    urls: d.urls || "",
+    freq: typeof d.freq==="number" ? d.freq : 0,
+    aliases: d.aliases || {}, // {url: name}
+  };
+}
+function saveCfg(patch){
+  const old = loadCfg();
+  const cfg = {...old, ...patch};
+  localStorage.setItem(KEY_CFG, JSON.stringify(cfg));
+}
+function loadRecs(){
+  return JSON.parse(localStorage.getItem(KEY_REC) || "[]");
+}
+function saveRecs(arr){
+  localStorage.setItem(KEY_REC, JSON.stringify(arr));
+}
+function pushRecs(newOnes){
+  const arr = loadRecs();
+  newOnes.forEach(r => arr.push(r));
+  saveRecs(arr);
+}
+
+/* -------------------- 小工具 -------------------- */
+function nowTs(){ return Date.now(); }
+function ymd(ts){
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function todayRange(){
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  const start = d.getTime();
+  const end = start + 24*60*60*1000;
+  return [start, end];
+}
+function toNumberRemaining(s){ // "剩：910" -> 910
+  if (!s) return null;
+  const n = s.replace(/[^\d]/g,"");
+  return n ? Number(n) : null;
+}
+function nickname(url){
+  const { aliases } = loadCfg();
+  return aliases[url] || "";
+}
+
+/* -------------------- 進度指示 -------------------- */
+function startLoading(urlsText) {
+  const runBtn = document.getElementById('run');
+  runBtn.disabled = true;
+  runBtn.dataset._orig = runBtn.textContent;
+  runBtn.textContent = '抓取中…';
+
+  const count = urlsText.includes(',') ? urlsText.split(',').filter(s=>s.trim()).length : 1;
+  document.getElementById('status').innerHTML =
+    `<span class="spinner"></span>正在抓取 ${count} 個網址…`;
+  document.getElementById('errors').textContent = '';
+
+  startAt = Date.now();
+  document.getElementById('tick').style.display = '';
+  document.getElementById('elapsed').textContent = '0';
+  loadingTimer = setInterval(()=>{
+    const sec = Math.floor((Date.now() - startAt)/1000);
+    document.getElementById('elapsed').textContent = String(sec);
+  }, 500);
+}
+function stopLoading(ok=true) {
+  const runBtn = document.getElementById('run');
+  if (runBtn.dataset._orig) {
+    runBtn.textContent = runBtn.dataset._orig;
+    delete runBtn.dataset._orig;
+  }
+  runBtn.disabled = false;
+
+  if (loadingTimer) { clearInterval(loadingTimer); loadingTimer = null; }
+  document.getElementById('tick').style.display = 'none';
+  if (ok) {
+    const ts = new Date().toLocaleString();
+    document.getElementById('status').textContent = `最後更新：${ts}　` +
+      `<span class="badge">用時 ${((Date.now()-startAt)/1000).toFixed(1)}s</span>`;
+  }
+}
+
+/* -------------------- 抓取與渲染 -------------------- */
+async function fetchStatus() {
+  const urls = document.getElementById('urls').value.trim();
+  const target = urls.includes(",") ? `${API}?urls=${encodeURIComponent(urls)}` :
+                 urls ? `${API}?url=${encodeURIComponent(urls)}` : null;
+  if (!target) {
+    document.getElementById('errors').textContent = "請先輸入 OpenTix 活動網址";
+    return;
+  }
+
+  startLoading(urls);
+
+  try {
+    // 不使用 AbortController，不會逾時自動取消；會一直等後端回應
+    const res = await fetch(target, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error(`回應非 JSON：${text.slice(0,80)}…`);
+    }
+
+    renderLiveTable(data);
+    persistRecords(data);
+    renderHistory();
+    renderSpeed();
+    stopLoading(true);
+
+    if (data.errors && data.errors.length) {
+      document.getElementById('errors').textContent = data.errors.join(" | ");
+    } else {
+      document.getElementById('errors').textContent = "";
+    }
+  } catch (e) {
+    stopLoading(false);
+    document.getElementById('errors').textContent = `讀取失敗：${e.message || e}`;
+    document.getElementById('status').textContent = "";
+  }
+}
+
+function renderLiveTable(data){
+  const tbl = document.getElementById('tbl');
+  const tbody = tbl.querySelector('tbody');
+  tbody.innerHTML = "";
+  if (!data || !data.results || data.results.length === 0) {
+    tbl.style.display = "none";
+    return;
+  }
+  data.results.forEach(r => {
+    const alias = nickname(r.url);
+    const nameCell = alias ? `${alias} <span class="pill">${new URL(r.url).hostname}</span>` :
+                             `<a href="${r.url}" target="_blank">${new URL(r.url).hostname}</a>`;
+    if (!r.entries || r.entries.length === 0) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${nameCell}</td><td class="muted">未偵測到「剩：xxx」</td><td>—</td>`;
+      tbody.appendChild(tr);
+    } else {
+      r.entries.forEach(e => {
+        const remainNum = toNumberRemaining(e.remaining);
+        const { delta, dir } = computeDelta(r.url, e.label, remainNum);
+        const deltaHtml = delta != null ? `<span class="delta ${dir==='up'?'up':(dir==='down'?'down':'')}">${Math.abs(delta)}</span>` : "";
+        const badge = remainNum!=null && remainNum<=200 ? ' tag low' : ' tag';
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td>${nameCell}</td>
+           <td>${e.label ? e.label : '<span class="muted">場次</span>'}</td>
+           <td><span class="${badge}">${e.remaining}</span>${deltaHtml}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+  });
+  tbl.style.display = "";
+  const errBox = document.getElementById('errors');
+  errBox.textContent = "";
+  if (data.errors && data.errors.length) {
+    errBox.textContent = data.errors.join(" | ");
+  }
+}
+
+function persistRecords(data){
+  if (!data || !data.results) return;
+  const ts = nowTs();
+  const recs = [];
+  data.results.forEach(r => {
+    if (!r.entries || r.entries.length===0) return;
+    r.entries.forEach(e => {
+      const n = toNumberRemaining(e.remaining);
+      if (n==null) return;
+      recs.push({ url: r.url, label: e.label || "場次", remaining: n, ts });
+    });
+  });
+  if (recs.length) pushRecs(recs);
+}
+
+function computeDelta(url, label, currentRemaining){
+  if (currentRemaining==null) return { delta: null, dir: null };
+  const arr = loadRecs().filter(x => x.url===url && x.label===label);
+  if (arr.length<1) return { delta: null, dir: null };
+  const last = arr[arr.length-1]; // persistRecords 在 render 之後呼叫，因此這裡拿的是上一輪
+  const d = last ? (last.remaining - currentRemaining) : null; // 售出量 = 上一筆剩餘 - 本筆剩餘
+  if (d==null) return { delta: null, dir: null };
+  const val = d>0 ? d : 0;
+  return { delta: val, dir: d>0 ? 'up' : (d<0 ? 'down' : 'flat') };
+}
+
+/* -------------------- 歷史（日誌＋日售表） -------------------- */
+function renderHistory(){
+  const [start, end] = todayRange();
+  const all = loadRecs().filter(x => x.ts>=start && x.ts<end);
+  const byKey = {}; // key = url||label
+  all.forEach(r => {
+    const key = r.url + "||" + r.label;
+    if (!byKey[key]) byKey[key] = [];
+    byKey[key].push(r);
+  });
+  const wrap = document.getElementById('historyContainer');
+  wrap.innerHTML = "";
+  const keys = Object.keys(byKey).sort();
+  if (!keys.length){
+    wrap.innerHTML = `<div class="muted">今天尚無紀錄</div>`;
+    return;
+  }
+  keys.forEach(k => {
+    const rows = byKey[k].sort((a,b)=>a.ts-b.ts);
+    const [url, label] = k.split("||");
+    const alias = nickname(url);
+    const title = alias ? `${alias}（${label}）` : `${new URL(url).hostname}（${label}）`;
+    const tbl = document.createElement('table');
+    tbl.innerHTML = `<thead><tr><th>${title}</th><th>時間</th><th>剩餘</th><th>本次售出</th></tr></thead>`;
+    const tb = document.createElement('tbody');
+    let prev = null;
+    rows.forEach(r => {
+      const time = new Date(r.ts).toLocaleTimeString();
+      let sold = 0;
+      if (prev) {
+        const d = prev.remaining - r.remaining;
+        sold = d>0 ? d : 0;
+      }
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><a href="${url}" target="_blank">${alias || new URL(url).hostname}</a></td>
+                      <td>${time}</td>
+                      <td>${r.remaining}</td>
+                      <td>${sold}</td>`;
+      tb.appendChild(tr);
+      prev = r;
+    });
+    tbl.appendChild(tb);
+    wrap.appendChild(tbl);
+  });
+}
+
+/* -------------------- 速度比較（今日） -------------------- */
+function renderSpeed(){
+  const [start, end] = todayRange();
+  const all = loadRecs().filter(x => x.ts>=start && x.ts<end);
+  if (!all.length){
+    document.getElementById('speedTbl').style.display="none";
+    return;
+  }
+  // 先依 url+label 算每條時序的售出總量，再按 url 匯總
+  const byKey = {};
+  all.forEach(r => {
+    const k = r.url + "||" + r.label;
+    if (!byKey[k]) byKey[k] = [];
+    byKey[k].push(r);
+  });
+  const soldByUrl = {};
+  let earliestTs = Infinity, latestTs = 0;
+  Object.keys(byKey).forEach(k => {
+    const arr = byKey[k].sort((a,b)=>a.ts-b.ts);
+    let prev = null, sum = 0;
+    arr.forEach(r => {
+      if (!prev){ prev = r; earliestTs = Math.min(earliestTs, r.ts); latestTs = Math.max(latestTs, r.ts); return; }
+      const d = prev.remaining - r.remaining;
+      if (d>0) sum += d;
+      prev = r;
+      latestTs = Math.max(latestTs, r.ts);
+    });
+    const url = k.split("||")[0];
+    soldByUrl[url] = (soldByUrl[url] || 0) + sum;
+  });
+  const hours = Math.max(1, (latestTs - earliestTs) / (1000*60*60));
+  const rows = Object.keys(soldByUrl).map(url => {
+    const alias = nickname(url);
+    return {
+      url, alias,
+      sold: soldByUrl[url],
+      perHour: (soldByUrl[url]/hours)
+    };
+  }).sort((a,b)=>b.sold - a.sold);
+
+  const tbl = document.getElementById('speedTbl');
+  const tb = tbl.querySelector('tbody');
+  tb.innerHTML = "";
+  rows.forEach(r => {
+    const nameCell = r.alias ? `${r.alias} <span class="pill">${new URL(r.url).hostname}</span>` :
+                               `<a href="${r.url}" target="_blank">${new URL(r.url).hostname}</a>`;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${nameCell}</td><td>${r.sold}</td><td>${r.perHour.toFixed(1)} 張/小時</td>`;
+    tb.appendChild(tr);
+  });
+  tbl.style.display = "";
+}
+
+/* -------------------- 匯出/清除/別名 -------------------- */
+function exportCsv(){
+  const data = loadRecs();
+  if (!data.length){ alert("沒有可匯出的資料"); return; }
+  const header = ["url","label","remaining","timestamp","datetime"];
+  const lines = [header.join(",")];
+  data.forEach(r => {
+    const dt = new Date(r.ts).toISOString();
+    const row = [
+      `"${r.url}"`,
+      `"${(r.label||"").replace(/"/g,'""')}"`,
+      r.remaining,
+      r.ts,
+      `"${dt}"`
+    ];
+    lines.push(row.join(","));
+  });
+  const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8;"});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `opentix_watch_${ymd(nowTs())}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function clearHistory(){
+  if (!confirm("確定要刪除所有歷史紀錄？")) return;
+  saveRecs([]);
+  renderHistory();
+  renderSpeed();
+  alert("已清除。");
+}
+
+function setupAlias(){
+  const cfg = loadCfg();
+  const urls = (document.getElementById('urls').value||"").split(",").map(s=>s.trim()).filter(Boolean);
+  if (!urls.length){ alert("請先在上方輸入至少一個 URL"); return; }
+  const aliases = {...cfg.aliases};
+  for (const u of urls){
+    const cur = aliases[u] || "";
+    const v = prompt(`為此 URL 設定別名（節目名或內部名稱）：\n${u}`, cur);
+    if (v===null) continue;
+    aliases[u] = v.trim();
+  }
+  saveCfg({aliases});
+  document.getElementById('run').click(); // 重新渲染即時表
+}
+
+/* -------------------- 監測排程 -------------------- */
+function startMonitoring(){
+  const freqMin = Number(document.getElementById('freq').value || "0");
+  if (!freqMin){ alert("請選擇監測頻率（非關閉）"); return; }
+  if (timer) clearInterval(timer);
+  timer = setInterval(fetchStatus, freqMin*60*1000);
+  document.getElementById('startStop').textContent = "停止監測";
+  document.getElementById('startStop').classList.remove('secondary');
+  document.getElementById('startStop').classList.add('ghost');
+  saveCfg({ freq: freqMin, urls: document.getElementById('urls').value.trim() });
+  fetchStatus(); // 立即抓一次
+}
+function stopMonitoring(){
+  if (timer) clearInterval(timer);
+  timer = null;
+  document.getElementById('startStop').textContent = "開始監測";
+  document.getElementById('startStop').classList.add('secondary');
+  document.getElementById('startStop').classList.remove('ghost');
+  saveCfg({ freq: 0, urls: document.getElementById('urls').value.trim() });
+}
+
+/* -------------------- 分頁切換 -------------------- */
+document.querySelectorAll('.tab').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    el.classList.add('active');
+    const name = el.dataset.tab;
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    document.getElementById('panel-'+name).classList.add('active');
+  });
+});
+
+/* -------------------- 事件綁定 -------------------- */
+document.getElementById('run').addEventListener('click', ()=>{
+  saveCfg({ urls: document.getElementById('urls').value.trim() });
+  fetchStatus();
+});
+document.getElementById('exportCsv').addEventListener('click', exportCsv);
+document.getElementById('clearHist').addEventListener('click', clearHistory);
+document.getElementById('alias').addEventListener('click', setupAlias);
+document.getElementById('startStop').addEventListener('click', ()=>{
+  if (timer) stopMonitoring(); else startMonitoring();
+});
+
+/* -------------------- 初始化 -------------------- */
+(function init(){
+  const cfg = loadCfg();
+  document.getElementById('urls').value = cfg.urls || "";
+  document.getElementById('freq').value = String(cfg.freq || 0);
+  if (cfg.freq && cfg.urls){
+    startMonitoring(); // 重新載入頁面時自動續跑
+  }
+})();
+</script>
+</body>
+</html>
