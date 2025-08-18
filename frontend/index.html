@@ -1,304 +1,82 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OpenTix Watch — 監測面板</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>售票監測工具</title>
   <style>
-    :root{
-      --bg:#0b0c0f; --card:#151821; --muted:#9aa3b2; --text:#eef2ff; --accent:#6ea8fe; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --line:#232737;
-    }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Noto Sans TC", "PingFang TC", Segoe UI, Roboto, Arial, sans-serif; background:linear-gradient(180deg,#0a0b0e,#10131a); color:var(--text)}
-    .container{max-width:1050px; margin:32px auto; padding:0 16px}
-    h1{display:flex; align-items:center; gap:10px; margin:0 0 16px; font-size:22px; letter-spacing:.5px}
-    .sub{color:var(--muted); font-size:12px}
-    .panel{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:0 8px 30px rgba(0,0,0,.35)}
-
-    /* form */
-    .form{display:grid; grid-template-columns:1.2fr .9fr .7fr auto; gap:10px; align-items:end}
-    label{display:block; font-size:12px; color:var(--muted); margin-bottom:6px}
-    input[type=text], select{width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:#0f1117; color:var(--text); outline:none}
-    input::placeholder{color:#697086}
-    button{border:0; border-radius:12px; padding:10px 14px; background:var(--accent); color:#0a0b12; font-weight:700; cursor:pointer}
-    button[disabled]{opacity:.5; cursor:not-allowed}
-
-    /* tabs */
-    .tabs{display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 8px}
-    .tab{display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:12px; border:1px solid var(--line); background:#0f1117; color:#muted; cursor:pointer}
-    .tab.active{background:#1a2030; color:#dbe4ff; border-color:#33436a}
-    .tab .alias{font-weight:700}
-    .tab .badge{font-size:11px; color:#aab4d0; background:#1e2433; padding:2px 6px; border-radius:999px}
-    .close{opacity:.7}
-
-    /* table */
-    table{width:100%; border-collapse:collapse; margin-top:8px; overflow:hidden; border-radius:10px}
-    thead th{font-size:12px; color:#a8b3cf; text-align:left; padding:10px; background:#141827; border-bottom:1px solid var(--line)}
-    tbody td{padding:10px; border-bottom:1px solid var(--line);}
-    tbody tr:hover{background:#121626}
-    a{color:#9ec1ff; text-decoration:none}
-    .muted{color:var(--muted);}
-    .tag{display:inline-block; padding:3px 8px; border-radius:999px; background:#1b2030; color:#dbe6ff; font-size:12px}
-
-    .statusbar{display:flex; gap:12px; align-items:center; margin-top:8px; color:var(--muted); font-size:12px}
-    .dot{width:8px; height:8px; border-radius:999px; background:var(--ok)}
-    .dot.loading{background:var(--warn)}
-    .dot.error{background:var(--err)}
-    .spinner {
-      width: 14px;
-      height: 14px;
-      border: 2px solid rgba(255,255,255,0.2);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .err{color:var(--err)}
-    .btn-sm{background:#1f2937; color:#c7d2fe; border:1px solid #2b3550}
-
-    @media (max-width:820px){
-      .form{grid-template-columns:1fr}
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .item { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+    .start-btn { background: #4caf50; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; }
+    .start-btn:hover { background: #45a049; }
+    .results { margin-top: 10px; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 11h18M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="#9ec1ff" stroke-width="1.6"/><circle cx="8" cy="8" r="1.3" fill="#9ec1ff"/><circle cx="12" cy="8" r="1.3" fill="#9ec1ff"/><circle cx="16" cy="8" r="1.3" fill="#9ec1ff"/></svg>
-      OpenTix Watch <span class="sub">· 售票監測面板</span>
-    </h1>
+  <h1>售票監測工具</h1>
 
-    <div class="panel">
-      <div class="form">
-        <div>
-          <label>活動網址（可多個，以逗號分隔）</label>
-          <input id="urls" type="text" placeholder="https://www.opentix.life/event/xxxx, https://www.opentix.life/event/yyyy" />
-        </div>
-        <div>
-          <label>別名（必填，將用於分頁標題）</label>
-          <input id="alias" type="text" placeholder="例如：座無虛席" />
-        </div>
-        <div>
-          <label>監測頻率</label>
-          <select id="freq">
-            <option value="1h">每 1 小時</option>
-            <option value="6h">每 6 小時</option>
-            <option value="24h">每天</option>
-          </select>
-        </div>
-        <div>
-          <button id="add">新增並開始</button>
-        </div>
-      </div>
+  <div id="items"></div>
 
-      <div class="tabs" id="tabs"></div>
+  <script>
+    // ⚠️ 記得改成你的 Render 網址
+    const API = "https://opentix-watch-1.onrender.com/api/status";
 
-      <div class="statusbar">
-        <span class="dot" id="liveDot"></span>
-        <span id="spinner" class="spinner" style="display:none"></span>
-        <span id="status">尚未執行</span>
-        <button class="btn-sm" id="refresh" style="margin-left:auto">立即更新</button>
-      </div>
+    // 假資料，實際上應該來自使用者輸入或保存的設定
+    const items = [
+      { alias: "戲劇A", urls: "https://www.opentix.life/event/1234567890" },
+      { alias: "戲劇B", urls: "https://www.opentix.life/event/9876543210" }
+    ];
 
-      <table id="tbl" style="display:none">
-        <thead>
-          <tr><th>URL</th><th>標籤</th><th>剩餘</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <div id="errors" class="err" style="margin-top:8px"></div>
-    </div>
-  </div>
+    function renderItems() {
+      const container = document.getElementById("items");
+      container.innerHTML = "";
+      items.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "item";
 
-<script>
-const API_BASE = "https://opentix-watch-1.onrender.com"; // ← 你的後端
-const API = `${API_BASE}/api/status`;
+        const title = document.createElement("h3");
+        title.innerText = item.alias;
 
-/*** 狀態管理 ***/
-let state = loadState();
-let activeAlias = Object.keys(state)[0] || null;
+        const btn = document.createElement("button");
+        btn.className = "start-btn";
+        btn.innerText = "開始";
+        // ✅ 綁定事件，點了會去呼叫後端
+        btn.addEventListener("click", () => runFetch(item));
 
-const $ = (q) => document.querySelector(q);
-const urlsInput = $('#urls');
-const aliasInput = $('#alias');
-const freqSel = $('#freq');
-const addBtn = $('#add');
-const tabsEl = $('#tabs');
-const statusEl = $('#status');
-const tblEl = $('#tbl');
-const tbodyEl = tblEl.querySelector('tbody');
-const errEl = $('#errors');
-const liveDot = $('#liveDot');
-const spinnerEl = $('#spinner');
-const refreshBtn = $('#refresh');
-let timers = {};
+        const results = document.createElement("div");
+        results.className = "results";
+        results.id = `results-${item.alias}`;
 
-function setDot(mode){
-  liveDot.classList.remove('loading','error');
-  if(mode==='loading') liveDot.classList.add('loading');
-  else if(mode==='error') liveDot.classList.add('error');
-}
-
-function toggleAdd(){
-  const aliasOk = aliasInput.value.trim().length>0;
-  addBtn.disabled = !aliasOk;
-}
-aliasInput.addEventListener('input', toggleAdd);
-urlsInput.addEventListener('input', toggleAdd);
-addBtn.disabled = false;
-
-addBtn.addEventListener('click', () => {
-  const alias = aliasInput.value.trim();
-  const urls  = urlsInput.value.trim();
-  const freq  = freqSel.value;
-  if(!alias){ toast('請輸入別名'); return; }
-  if(!urls){ toast('請輸入至少一個活動網址'); return; }
-  if(state[alias]){ toast('此別名已存在，請更換'); return; }
-  state[alias] = { urls, freq, last:null, updatedAt:null };
-  saveState();
-  aliasInput.value='';
-  addBtn.disabled = true;
-  renderTabs();
-  setActive(alias);
-  runFetch(alias);
-});
-
-function renderTabs(){
-  tabsEl.innerHTML = '';
-  const names = Object.keys(state);
-  if(names.length===0){ statusEl.textContent = '尚未建立任何監測項目'; tblEl.style.display='none'; return; }
-  names.forEach(name => {
-    const t = document.createElement('div');
-    t.className = 'tab' + (name===activeAlias?' active':'');
-    t.innerHTML = `<span class="alias">${name}</span>
-                   <span class="badge">${labelOfFreq(state[name].freq)}</span>
-                   <svg class="close" data-alias="${name}" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-left:6px">
-                     <path d="M6 6l12 12M18 6L6 18" stroke="#7b88a8" stroke-width="1.6" stroke-linecap="round"/>
-                   </svg>`;
-    t.addEventListener('click', (e)=>{
-      const target = e.target.closest('.close');
-      if(target){
-        const a = target.getAttribute('data-alias');
-        removeAlias(a);
-        return;
-      }
-      setActive(name);
-    });
-    tabsEl.appendChild(t);
-  });
-}
-
-function setActive(name){
-  activeAlias = name; renderTabs(); draw(activeAlias); setupTimer(activeAlias);
-}
-
-function removeAlias(name){
-  clearTimer(name);
-  delete state[name];
-  saveState();
-  const rest = Object.keys(state);
-  activeAlias = rest[0] || null;
-  renderTabs();
-  draw(activeAlias);
-}
-
-function draw(name){
-  errEl.textContent='';
-  setDot();
-  spinnerEl.style.display = 'none';
-  if(!name){ statusEl.textContent='尚未建立任何監測'; tblEl.style.display='none'; return; }
-  const item = state[name];
-  if(!item || !item.last){
-    statusEl.textContent = '尚未抓取';
-    tblEl.style.display='none';
-    return;
-  }
-  const data = item.last;
-  const ts = item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '';
-  statusEl.textContent = `別名：${name} · 來源：${shorten(item.urls)} · 最後更新：${ts}`;
-  tbodyEl.innerHTML = '';
-  if(!data || !data.results || data.results.length===0){
-    tblEl.style.display='none';
-  }else{
-    data.results.forEach(r=>{
-      if(!r.entries || r.entries.length===0){
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeHTML(r.url)}</td><td class="muted">未偵測到「剩：xxx」</td><td>—</td>`;
-        tbodyEl.appendChild(tr);
-      }else{
-        r.entries.forEach(e=>{
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td><a href="${r.url}" target="_blank">${new URL(r.url).hostname}</a></td>
-                          <td>${e.label ? escapeHTML(e.label) : '<span class="muted">場次</span>'}</td>
-                          <td><span class="tag">${escapeHTML(e.remaining)}</span></td>`;
-          tbodyEl.appendChild(tr);
-        });
-      }
-    });
-    tblEl.style.display='';
-  }
-  if(data.errors && data.errors.length){
-    errEl.textContent = data.errors.map(e=>`${e.url||''} ${e.error||e}`).join(' | ');
-    setDot('error');
-  }
-}
-
-async function runFetch(name){
-  const item = state[name];
-  if(!item) return;
-
-  errEl.textContent='';
-  statusEl.textContent = `正在抓取（${name}）…`;
-  setDot('loading');
-  spinnerEl.style.display = 'inline-block';
-
-  try{
-    const target = item.urls.includes(',') ? `${API}?urls=${encodeURIComponent(item.urls)}` : `${API}?url=${encodeURIComponent(item.urls)}`;
-    const res = await fetch(target, { cache:'no-store' });
-    if(!res.ok){
-      throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        div.appendChild(title);
+        div.appendChild(btn);
+        div.appendChild(results);
+        container.appendChild(div);
+      });
     }
-    const data = await res.json();
-    item.last = data; item.updatedAt = Date.now(); saveState();
-    if(name===activeAlias) draw(name);
-    setDot();
-  }catch(e){
-    errEl.textContent = '讀取失敗：' + (e?.message || e);
-    statusEl.textContent = '讀取失敗';
-    setDot('error');
-  }finally{
-    spinnerEl.style.display = 'none';
-  }
-}
 
-function setupTimer(name){
-  Object.keys(timers).forEach(clearTimer);
-  const item = state[name]; if(!item) return;
-  const ms = freqToMs(item.freq);
-  timers[name] = setInterval(()=> runFetch(name), ms);
-}
-function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
+    async function runFetch(item) {
+      const resultsDiv = document.getElementById(`results-${item.alias}`);
+      resultsDiv.innerText = "抓取中...";
 
-function labelOfFreq(v){ return v==='1h'?'每 1 小時': (v==='6h'?'每 6 小時':'每天'); }
-function freqToMs(v){ return v==='1h'? 3600_000 : (v==='6h'? 6*3600_000 : 24*3600_000); }
-function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
-function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
-function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;","">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+      try {
+        const target = item.urls.includes(',')
+          ? `${API}?urls=${encodeURIComponent(item.urls)}`
+          : `${API}?url=${encodeURIComponent(item.urls)}`;
 
-function saveState(){ localStorage.setItem('opentix_watch_state', JSON.stringify(state)); }
-function loadState(){ try{ return JSON.parse(localStorage.getItem('opentix_watch_state')||'{}') }catch{ return {} } }
+        const res = await fetch(target);
+        const data = await res.json();
 
-refreshBtn.addEventListener('click', ()=>{
-  if(!activeAlias){ toast('沒有可更新的項目'); return; }
-  runFetch(activeAlias);
-});
+        if (data.errors && data.errors.length > 0) {
+          resultsDiv.innerText = "錯誤：" + data.errors.join(", ");
+        } else {
+          resultsDiv.innerText = JSON.stringify(data.results, null, 2);
+        }
+      } catch (err) {
+        resultsDiv.innerText = "抓取失敗：" + err.message;
+      }
+    }
 
-// 初始渲染
-renderTabs(); draw(activeAlias);
-if(activeAlias){ setupTimer(activeAlias); }
-</script>
+    renderItems();
+  </script>
 </body>
 </html>
