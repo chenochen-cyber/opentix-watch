@@ -1,10 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from scraper import scrape_status as _scrape_status
+from scraper import run_once
 
 app = FastAPI()
 
-# CORS 設定
+# CORS 設定，方便前端 fetch
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,14 +13,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Render 會先打 "/" 測試服務有沒有起來
 @app.get("/")
 def home():
+    """Render 會先打 / 來檢查服務有沒有啟動"""
     return {"message": "Service is running"}
 
-# API：檢查票券狀態
 @app.get("/api/status")
-async def api_status(targets: str):
-    # 這裡原本多了一個 headless=True，已經拿掉
-    data = _scrape_status(targets)
-    return data
+async def api_status(
+    url: str = Query(None),
+    urls: str = Query(None)
+):
+    """
+    抓取票券狀態
+    - url: 單一網址
+    - urls: 多個網址，用逗號分隔
+    """
+    try:
+        data = await run_once(url=url, urls=urls)
+        return data
+    except Exception as e:
+        # 這樣即使爬蟲掛掉，也能回 JSON，不會變 500
+        return {"results": [], "errors": [str(e)]}
