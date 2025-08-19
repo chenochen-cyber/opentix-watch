@@ -26,7 +26,7 @@
 
     /* tabs */
     .tabs{display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 8px}
-    .tab{display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:12px; border:1px solid var(--line); background:#0f1117; color:var(--muted); cursor:pointer}
+    .tab{display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:12px; border:1px solid var(--line); background:#0f1117; color:#muted; cursor:pointer}
     .tab.active{background:#1a2030; color:#dbe4ff; border-color:#33436a}
     .tab .alias{font-weight:700}
     .tab .badge{font-size:11px; color:#aab4d0; background:#1e2433; padding:2px 6px; border-radius:999px}
@@ -46,8 +46,19 @@
     .err{color:var(--err)}
     .btn-sm{background:#1f2937; color:#c7d2fe; border:1px solid #2b3550}
 
+    /* history panel */
+    .hist-kpis{display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-top:10px}
+    .kpi{background:#0f1117; border:1px solid var(--line); border-radius:12px; padding:10px}
+    .kpi .label{font-size:11px; color:#a8b3cf}
+    .kpi .value{font-size:18px; font-weight:800; margin-top:6px}
+    .kpi .hint{font-size:11px; color:#7f8aa9; margin-top:4px}
+    .sparkline-wrap{margin-top:10px; background:#0f1117; border:1px solid var(--line); border-radius:12px; padding:10px}
+    .spark-title{display:flex; align-items:center; justify-content:space-between; font-size:12px; color:#a8b3cf; margin-bottom:6px}
+    .spark-meta{font-size:11px; color:#7f8aa9}
+
     @media (max-width:820px){
       .form{grid-template-columns:1fr}
+      .hist-kpis{grid-template-columns:1fr}
     }
   </style>
 </head>
@@ -71,6 +82,7 @@
         <div>
           <label>監測頻率</label>
           <select id="freq">
+            <option value="10m">每 10 分鐘</option>
             <option value="1h">每 1 小時</option>
             <option value="6h">每 6 小時</option>
             <option value="24h">每天</option>
@@ -104,7 +116,7 @@ const API_BASE = "https://opentix-watch-1.onrender.com";
 const API = `${API_BASE}/api/status`;
 
 /*** 狀態管理：加入 history 以便累積統計 ***/
-// state 形如：{ alias: { urls, freq, last, updatedAt, history: [{ts, totalRemain}], maxHistory } }
+// state: { alias: { urls, freq, last, updatedAt, history: [{ts, totalRemain}], maxHistory } }
 let state = loadState();
 let activeAlias = Object.keys(state)[0] || null;
 
@@ -141,13 +153,37 @@ bar.insertBefore(btnHistory, btnRefresh);
 bar.insertBefore(btnCSV, btnRefresh);
 bar.insertBefore(btnReset, btnRefresh);
 
-/*** 歷史面板 ***/
+/*** 歷史面板（強化版） ***/
 let historyOpen = false;
 const histWrap = document.createElement('div');
 histWrap.id = 'histWrap';
 histWrap.style.display = 'none';
 histWrap.style.marginTop = '10px';
 histWrap.innerHTML = `
+  <div class="hist-kpis">
+    <div class="kpi">
+      <div class="label">近 24 小時售出</div>
+      <div class="value" id="kpiSold24h">—</div>
+      <div class="hint">（若為 0 可能為無變動或資料不足）</div>
+    </div>
+    <div class="kpi">
+      <div class="label">平均速率（張/小時）</div>
+      <div class="value" id="kpiAvgRate">—</div>
+      <div class="hint">近 24 小時平均</div>
+    </div>
+    <div class="kpi">
+      <div class="label">最近一次變動</div>
+      <div class="value" id="kpiLastDelta">—</div>
+      <div class="hint">相對上一筆</div>
+    </div>
+  </div>
+  <div class="sparkline-wrap">
+    <div class="spark-title">
+      <span>剩餘張數趨勢（近 24 小時）</span>
+      <span class="spark-meta" id="sparkMeta">—</span>
+    </div>
+    <canvas id="spark" width="960" height="160"></canvas>
+  </div>
   <table id="histTbl" style="width:100%; border-collapse:collapse; margin-top:8px; border-radius:10px; display:none">
     <thead>
       <tr><th>時間</th><th>總剩餘</th><th>與前次差</th><th>估算速率(張/小時)</th></tr>
@@ -161,7 +197,11 @@ btnHistory.addEventListener('click', () => {
   historyOpen = !historyOpen;
   histWrap.style.display = historyOpen ? '' : 'none';
   btnHistory.textContent = historyOpen ? '收起歷史' : '查看歷史';
-  if (historyOpen && activeAlias) drawHistory(activeAlias);
+  if (historyOpen && activeAlias) {
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 });
 btnCSV.addEventListener('click', () => { if(activeAlias) downloadCSV(activeAlias); });
 btnReset.addEventListener('click', () => {
@@ -170,7 +210,11 @@ btnReset.addEventListener('click', () => {
   state[activeAlias].history = [];
   saveState();
   draw(activeAlias);
-  if(historyOpen) drawHistory(activeAlias);
+  if(historyOpen){
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 });
 
 /*** 表單與分頁 ***/
@@ -225,7 +269,11 @@ function renderTabs(){
 
 function setActive(name){
   activeAlias = name; renderTabs(); draw(activeAlias); setupTimer(activeAlias);
-  if(historyOpen) drawHistory(activeAlias);
+  if(historyOpen){
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 }
 
 function removeAlias(name){
@@ -236,7 +284,11 @@ function removeAlias(name){
   activeAlias = rest[0] || null;
   renderTabs();
   draw(activeAlias);
-  if(historyOpen) drawHistory(activeAlias);
+  if(historyOpen){
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 }
 
 /*** 視圖繪製 ***/
@@ -255,8 +307,8 @@ function draw(name){
   const total = calcTotalRemain(data);
   const { delta, ratePerHour } = summarizeHistory(item.history);
 
-  // 狀態列摘要（總剩餘 / 與前次差 / 速率）
-  statusEl.textContent = `別名：${name} · 來源：${shorten(item.urls)} · 最後更新：${ts} · 總剩餘：${total} · 與前次差：${fmtDelta(delta)} · 速率：${fmtRate(ratePerHour)}`
+  // 狀態列摘要（拿掉「別名：」）
+  statusEl.textContent = `${name} · 來源：${shorten(item.urls)} · 最後更新：${ts} · 總剩餘：${total} · 與前次差：${fmtDelta(delta)} · 速率：${fmtRate(ratePerHour)}`;
   
   // 表格
   tbodyEl.innerHTML = '';
@@ -293,6 +345,12 @@ function drawHistory(name){
   tbody.innerHTML = '';
   if(hist.length === 0){
     table.style.display = 'none';
+    $('#kpiSold24h').textContent = '—';
+    $('#kpiAvgRate').textContent = '—';
+    $('#kpiLastDelta').textContent = '—';
+    $('#sparkMeta').textContent = '尚無資料';
+    const ctx = $('#spark')?.getContext('2d');
+    if(ctx){ ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height); }
     return;
   }
   // 逐行列出：時間 / 總剩餘 / 與前次差 / 小時速率（對上一筆）
@@ -314,6 +372,82 @@ function drawHistory(name){
   table.style.display = '';
 }
 
+/*** Sparkline (近 24h) ***/
+function drawSparkline(name){
+  const item = state[name];
+  const hist = (item && item.history) ? item.history : [];
+  const canvas = document.getElementById('spark');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width, canvas.height);
+  if(hist.length<2){ $('#sparkMeta').textContent='資料不足'; return; }
+
+  const cutoff = Date.now() - 24*3600_000;
+  const sub = hist.filter(h => h.ts >= cutoff);
+  const used = sub.length>=2 ? sub : hist.slice(-Math.min(hist.length, 30));
+  if(used.length<2){ $('#sparkMeta').textContent='資料不足'; return; }
+
+  const w = canvas.width, h = canvas.height, pad = 10;
+  const xs = used.map((p,i)=> i);
+  const ys = used.map(p => p.totalRemain);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const dx = (w - pad*2) / (xs.length - 1 || 1);
+  const scaleY = (val)=> {
+    if(maxY===minY) return h/2;
+    return h - pad - ( (val - minY) / (maxY - minY) ) * (h - pad*2);
+  };
+
+  // 軸線 & 參考刻度
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = '#232737';
+  ctx.beginPath();
+  ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad); // x axis
+  ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad); // y axis
+  ctx.stroke();
+
+  // 參考線（min / max / latest）
+  ctx.font = '11px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#7f8aa9';
+  ctx.textAlign = 'left';
+  ctx.fillText(`min ${minY}`, pad+6, scaleY(minY)-4);
+  ctx.fillText(`max ${maxY}`, pad+6, scaleY(maxY)-4);
+  ctx.fillText(`latest ${ys[ys.length-1]}`, pad+6, scaleY(ys[ys.length-1])-4);
+
+  // 線
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#6ea8fe';
+  ctx.beginPath();
+  used.forEach((p,i)=>{
+    const x = pad + i*dx;
+    const y = scaleY(p.totalRemain);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // 結尾點
+  const lastX = pad + (used.length-1)*dx;
+  const lastY = scaleY(used[used.length-1].totalRemain);
+  ctx.fillStyle = '#6ea8fe';
+  ctx.beginPath(); ctx.arc(lastX,lastY,3,0,Math.PI*2); ctx.fill();
+
+  // Meta
+  const spanHrs = (used[used.length-1].ts - used[0].ts)/3600000;
+  $('#sparkMeta').textContent = `樣本數：${used.length} · 覆蓋時長：約 ${spanHrs.toFixed(2)} 小時`;
+}
+
+/*** KPI 填值 ***/
+function fillKpis(name){
+  const item = state[name];
+  const hist = (item && item.history) ? item.history : [];
+  const { sold24h, avgRate24h } = calc24h(hist);
+  const { delta } = summarizeHistory(hist);
+
+  $('#kpiSold24h').textContent = sold24h===null ? '—' : `${sold24h}`;
+  $('#kpiAvgRate').textContent = avgRate24h===null ? '—' : avgRate24h.toFixed(2);
+  $('#kpiLastDelta').textContent = delta===null ? '—' : fmtDelta(delta);
+}
+
 /*** 抓取與輪詢 ***/
 async function runFetch(name){
   const item = state[name];
@@ -330,18 +464,21 @@ async function runFetch(name){
     item.last = data; 
     item.updatedAt = Date.now();
 
-    // 新增：寫入歷史點
+    // 寫入歷史點
     const total = calcTotalRemain(data);
     if(!item.history) item.history = [];
     item.history.push({ ts: item.updatedAt, totalRemain: total });
-    // 限制歷史長度
     const cap = Number(item.maxHistory || 2000);
     if(item.history.length > cap) item.history = item.history.slice(-cap);
 
     saveState();
     if(name===activeAlias) {
       draw(name);
-      if(historyOpen) drawHistory(name);
+      if(historyOpen){
+        drawHistory(name);
+        drawSparkline(name);
+        fillKpis(name);
+      }
     }
     liveDot.style.background = '#22c55e'; // 綠色表示成功
   }catch(e){
@@ -361,8 +498,18 @@ function setupTimer(name){
 function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
 
 /*** 計算與工具 ***/
-function labelOfFreq(v){ return v==='1h'?'每 1 小時': (v==='6h'?'每 6 小時':'每天'); }
-function freqToMs(v){ return v==='1h'? 3600_000 : (v==='6h'? 6*3600_000 : 24*3600_000); }
+function labelOfFreq(v){ 
+  return v==='10m'?'每 10 分鐘'
+       : v==='1h' ? '每 1 小時'
+       : v==='6h' ? '每 6 小時'
+       : '每天';
+}
+function freqToMs(v){ 
+  return v==='10m' ? 10*60_000
+       : v==='1h'  ? 3600_000
+       : v==='6h'  ? 6*3600_000
+       : 24*3600_000; 
+}
 function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
 function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
 function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
@@ -402,6 +549,18 @@ function fmtRate(r){
   if(r===null || r===undefined || isNaN(r)) return '—';
   return r.toFixed(2);
 }
+function calc24h(hist){
+  if(!hist || hist.length<2) return { sold24h: null, avgRate24h: null };
+  const cutoff = Date.now() - 24*3600_000;
+  const sub = hist.filter(h => h.ts >= cutoff);
+  const used = sub.length>=2 ? sub : hist.slice(-Math.min(hist.length, 30));
+  if(used.length<2) return { sold24h: null, avgRate24h: null };
+
+  // sold = 第一筆剩餘 - 最後一筆剩餘（正數代表售出）
+  const sold = used[0].totalRemain - used[used.length-1].totalRemain;
+  const hours = Math.max((used[used.length-1].ts - used[0].ts)/3600000, 1e-6);
+  return { sold24h: sold, avgRate24h: sold/hours };
+}
 
 /*** 匯出 CSV ***/
 function downloadCSV(name){
@@ -437,7 +596,6 @@ function saveState(){ localStorage.setItem('opentix_watch_state', JSON.stringify
 function loadState(){ 
   try{ 
     const obj = JSON.parse(localStorage.getItem('opentix_watch_state')||'{}');
-    // 兼容舊資料：補上 history、maxHistory
     for(const k of Object.keys(obj)){
       obj[k].history = obj[k].history || [];
       obj[k].maxHistory = obj[k].maxHistory || 2000;
@@ -446,11 +604,11 @@ function loadState(){
   }catch{ return {} } 
 }
 
-/*** 初始渲染 ***/
+/*** 初始渲染與手動更新 ***/
 renderTabs(); draw(activeAlias);
 if(activeAlias){ setupTimer(activeAlias); }
+document.getElementById('refresh').addEventListener('click', () => { if(activeAlias) runFetch(activeAlias); });
 </script>
-
 
 </body>
 </html>
