@@ -657,15 +657,21 @@ document.getElementById('refresh').addEventListener('click', () => { if(activeAl
       });
     }catch(_){}
   }
-  async function refreshCount(){
-    try{
-      const r = await fetch(`${API_BASE}/online_count`);
-      const d = await r.json();
-      badge.textContent = `線上 ${d.count} 人`;
-    }catch(_){
-      badge.textContent = "線上 N/A";
+async function refreshCount(){
+  try{
+    const r = await fetch(`${API_BASE}/online_count`);
+    const d = await r.json();
+    badge.textContent = `線上 ${d.count} 人`;
+    if (d.count > 2) {
+      badge.style.color = "var(--err)";   // 紅字（已在 :root 定義 #ef4444）
+    } else {
+      badge.style.color = "var(--muted)"; // 原本灰色
     }
+  }catch(_){
+    badge.textContent = "線上 N/A";
+    badge.style.color = "var(--muted)";
   }
+}
 
   ping(); refreshCount();
   setInterval(ping, 20000);
