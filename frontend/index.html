@@ -24,14 +24,7 @@
 }
 
     .container{max-width:1050px; margin:32px auto; padding:0 16px}
-   h1 {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;  /* 左右分隔 */
-  margin: 0 0 16px;
-  font-size: 22px;
-  letter-spacing: .5px;
-}
+ 
     .sub{color:var(--muted); font-size:12px}
    /* 面板半透明 + 毛玻璃 */
 .panel {
@@ -657,7 +650,7 @@ document.getElementById('refresh').addEventListener('click', () => { if(activeAl
 
   async function ping(){
     try{
-      await fetch("/heartbeat", {
+        await fetch(`${API_BASE}/heartbeat`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({client_id: cid})
@@ -666,7 +659,7 @@ document.getElementById('refresh').addEventListener('click', () => { if(activeAl
   }
   async function refreshCount(){
     try{
-      const r = await fetch("/online_count");
+      const r = await fetch(`${API_BASE}/online_count`);
       const d = await r.json();
       badge.textContent = `線上 ${d.count} 人`;
     }catch(_){
