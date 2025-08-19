@@ -45,7 +45,7 @@
     .dot{width:8px; height:8px; border-radius:999px; background:var(--ok)}
     .err{color:var(--err)}
     .btn-sm{background:#1f2937; color:#c7d2fe; border:1px solid #2b3550}
-
+    .online-chip{margin-left:8px;padding:2px 8px;border-radius:999px;font-size:12px;background:#1e2433;color:var(--accent);border:1px solid #33436a;}
     /* history panel */
     .hist-kpis{display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-top:10px}
     .kpi{background:#0f1117; border:1px solid var(--line); border-radius:12px; padding:10px}
@@ -98,6 +98,7 @@
       <div class="statusbar">
         <span class="dot" id="liveDot"></span>
         <span id="status">尚未執行</span>
+        <span id="onlineBadge" class="online-chip">線上 — 人</span>
         <button class="btn-sm" id="refresh" style="margin-left:auto">立即更新</button>
       </div>
 
@@ -608,6 +609,42 @@ function loadState(){
 renderTabs(); draw(activeAlias);
 if(activeAlias){ setupTimer(activeAlias); }
 document.getElementById('refresh').addEventListener('click', () => { if(activeAlias) runFetch(activeAlias); });
+
+(function(){
+  const badge = document.getElementById("onlineBadge");
+  const cidKey = "client_id";
+  let cid = localStorage.getItem(cidKey);
+  if (!cid) {
+    cid = (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+    localStorage.setItem(cidKey, cid);
+  }
+
+  async function ping(){
+    try{
+      await fetch("/heartbeat", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({client_id: cid})
+      });
+    }catch(_){}
+  }
+  async function refreshCount(){
+    try{
+      const r = await fetch("/online_count");
+      const d = await r.json();
+      badge.textContent = `線上 ${d.count} 人`;
+    }catch(_){
+      badge.textContent = "線上 N/A";
+    }
+  }
+
+  ping(); refreshCount();
+  setInterval(ping, 20000);
+  setInterval(refreshCount, 20000);
+})();
+
+
+
 </script>
 
 </body>
