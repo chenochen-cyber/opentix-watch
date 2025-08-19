@@ -131,7 +131,12 @@
       <div class="statusbar">
         <span class="dot" id="liveDot"></span>
         <span id="status">尚未執行</span>
-        <span id="onlineBadge" class="online-chip">線上 — 人</span>
+     <!-- 線上人數徽章 -->
+  <span class="online-chip" id="onlineChip" title="目前同時在線">
+    <span class="online-dot"></span>
+    <span id="onlineNum">—</span> 人在線
+  </span>
+
         <button class="btn-sm" id="refresh" style="margin-left:auto">立即更新</button>
       </div>
 
