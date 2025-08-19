@@ -65,15 +65,16 @@
     .dot{width:8px; height:8px; border-radius:999px; background:var(--ok)}
     .err{color:var(--err)}
     .btn-sm{background:#1f2937; color:#c7d2fe; border:1px solid #2b3550}
-   .online-chip{
-  margin-left:8px;
-  padding:3px 10px;
-  border-radius:999px;
-  font-size:12px;
-  background:#1f2937
-  color:var(--accent);
-  border:1px solid rgba(110,168,254,0.4);
-  font-weight:600;
+.online-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  margin-left:8px; padding:2px 10px;
+  border-radius:999px; font-size:12px; font-weight:600;
+  background:#1e2433; color:var(--accent);
+  border:1px solid #33436a;
+  line-height:1; white-space:nowrap;
+}
+.online-dot{
+  width:6px; height:6px; border-radius:999px; background:var(--ok);
 }
     /* history panel */
     .hist-kpis{display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-top:10px}
