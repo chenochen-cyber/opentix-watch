@@ -522,10 +522,9 @@ async function runFetch(name){
 
 function setupTimer(name){
   if (timers[name]) clearInterval(timers[name]); // 只清自己的
-  const item = state[name]; 
-  if (!item) return;
+  const item = state[name]; if(!item) return;
   const ms = freqToMs(item.freq);
-  timers[name] = setInterval(() => runFetch(name), ms);
+  timers[name] = setInterval(()=> runFetch(name), ms);
 }
 
 function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
