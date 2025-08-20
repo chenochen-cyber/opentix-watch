@@ -19,11 +19,8 @@
       background-size: cover;
       color: var(--text);
     }
-
     .container{max-width:1050px; margin:32px auto; padding:0 16px}
     .sub{color:var(--muted); font-size:12px}
-
-    /* 面板半透明 + 毛玻璃 */
     .panel { background: rgba(21, 24, 33, 0.7); border: 1px solid rgba(35, 39, 55, 0.8); border-radius: 16px; padding: 16px; box-shadow: 0 8px 30px rgba(0,0,0,.35); backdrop-filter: blur(6px); }
 
     /* form */
@@ -45,7 +42,7 @@
     /* table */
     table{width:100%; border-collapse:collapse; margin-top:8px; overflow:hidden; border-radius:10px}
     thead th{font-size:12px; color:#a8b3cf; text-align:left; padding:10px; background:#141827; border-bottom:1px solid var(--line)}
-    tbody td{padding:10px; border-bottom:1px solid var(--line);}
+    tbody td{padding:10px; border-bottom:1px solid var(--line);} 
     tbody tr:hover{background:#121626}
     a{color:#9ec1ff; text-decoration:none}
     .muted{color:var(--muted);}
@@ -55,6 +52,7 @@
     .dot{width:8px; height:8px; border-radius:999px; background:var(--ok)}
     .err{color:var(--err)}
     .btn-sm{background:#1f2937; color:#c7d2fe; border:1px solid #2b3550}
+
     .sparkline-wrap { display: none !important; }
 
     /* history panel */
@@ -67,7 +65,10 @@
     .spark-title{display:flex; align-items:center; justify-content:space-between; font-size:12px; color:#a8b3cf; margin-bottom:6px}
     .spark-meta{font-size:11px; color:#7f8aa9}
 
-    @media (max-width:820px){ .form{grid-template-columns:1fr} .hist-kpis{grid-template-columns:1fr} }
+    @media (max-width:820px){
+      .form{grid-template-columns:1fr}
+      .hist-kpis{grid-template-columns:1fr}
+    }
   </style>
 </head>
 <body>
@@ -127,7 +128,7 @@ const API_BASE = "https://opentix-watch-1.onrender.com";
 const API = `${API_BASE}/api/status`;
 
 /*** 狀態管理：加入 history 以便累積統計 ***/
-// state: { alias: { urls, freq, last, updatedAt, history: [{ts, totalRemain}], maxHistory, nextAt, _busy } }
+// state: { alias: { urls, freq, last, updatedAt, history: [{ts, totalRemain}], maxHistory } }
 let state = loadState();
 let activeAlias = Object.keys(state)[0] || null;
 
@@ -143,51 +144,100 @@ const tbodyEl = tblEl.querySelector('tbody');
 const errEl = $('#errors');
 const liveDot = $('#liveDot');
 
+let timers = {};       // { alias: intervalId }
+let inflight = {};     // { alias: boolean } 併發保護，避免重疊請求導致 AbortError
+
 /*** 新增：工具按鈕 ***/
 const bar = document.querySelector('.statusbar');
-const btnHistory = document.createElement('button'); btnHistory.className='btn-sm'; btnHistory.textContent='查看歷史'; btnHistory.id='btnHistory';
-const btnCSV = document.createElement('button'); btnCSV.className='btn-sm'; btnCSV.textContent='匯出 CSV'; btnCSV.id='btnCSV';
-const btnReset = document.createElement('button'); btnReset.className='btn-sm'; btnReset.textContent='重置統計'; btnReset.id='btnReset';
+const btnHistory = document.createElement('button');
+btnHistory.className = 'btn-sm';
+btnHistory.textContent = '查看歷史';
+btnHistory.id = 'btnHistory';
+const btnCSV = document.createElement('button');
+btnCSV.className = 'btn-sm';
+btnCSV.textContent = '匯出 CSV';
+btnCSV.id = 'btnCSV';
+const btnReset = document.createElement('button');
+btnReset.className = 'btn-sm';
+btnReset.textContent = '重置統計';
+btnReset.id = 'btnReset';
 const btnRefresh = $('#refresh');
-bar.insertBefore(btnHistory, btnRefresh); bar.insertBefore(btnCSV, btnRefresh); bar.insertBefore(btnReset, btnRefresh);
+bar.insertBefore(btnHistory, btnRefresh);
+bar.insertBefore(btnCSV, btnRefresh);
+bar.insertBefore(btnReset, btnRefresh);
 
-/*** 歷史面板 ***/
+/*** 歷史面板（強化版） ***/
 let historyOpen = false;
 const histWrap = document.createElement('div');
-histWrap.id = 'histWrap'; histWrap.style.display='none'; histWrap.style.marginTop='10px';
+histWrap.id = 'histWrap';
+histWrap.style.display = 'none';
+histWrap.style.marginTop = '10px';
 histWrap.innerHTML = `
   <div class="hist-kpis">
-    <div class="kpi"><div class="label">近 24 小時售出</div><div class="value" id="kpiSold24h">—</div><div class="hint">（若為 0 可能為無變動或資料不足）</div></div>
-    <div class="kpi"><div class="label">平均速率（張/小時）</div><div class="value" id="kpiAvgRate">—</div><div class="hint">近 24 小時平均</div></div>
-    <div class="kpi"><div class="label">最近一次變動</div><div class="value" id="kpiLastDelta">—</div><div class="hint">相對上一筆</div></div>
+    <div class="kpi">
+      <div class="label">近 24 小時售出</div>
+      <div class="value" id="kpiSold24h">—</div>
+      <div class="hint">（若為 0 可能為無變動或資料不足）</div>
+    </div>
+    <div class="kpi">
+      <div class="label">平均速率（張/小時）</div>
+      <div class="value" id="kpiAvgRate">—</div>
+      <div class="hint">近 24 小時平均</div>
+    </div>
+    <div class="kpi">
+      <div class="label">最近一次變動</div>
+      <div class="value" id="kpiLastDelta">—</div>
+      <div class="hint">相對上一筆</div>
+    </div>
   </div>
   <div class="sparkline-wrap">
-    <div class="spark-title"><span>剩餘張數趨勢（近 24 小時）</span><span class="spark-meta" id="sparkMeta">—</span></div>
+    <div class="spark-title">
+      <span>剩餘張數趨勢（近 24 小時）</span>
+      <span class="spark-meta" id="sparkMeta">—</span>
+    </div>
     <canvas id="spark" width="960" height="160"></canvas>
   </div>
   <table id="histTbl" style="width:100%; border-collapse:collapse; margin-top:8px; border-radius:10px; display:none">
-    <thead><tr><th>時間</th><th>總剩餘</th><th>與前次差</th><th>估算速率(張/小時)</th></tr></thead>
+    <thead>
+      <tr><th>時間</th><th>總剩餘</th><th>與前次差</th><th>估算速率(張/小時)</th></tr>
+    </thead>
     <tbody></tbody>
-  </table>`;
-
+  </table>
+`;
 tblEl.parentNode.appendChild(histWrap);
 
 btnHistory.addEventListener('click', () => {
   historyOpen = !historyOpen;
   histWrap.style.display = historyOpen ? '' : 'none';
   btnHistory.textContent = historyOpen ? '收起歷史' : '查看歷史';
-  if (historyOpen && activeAlias) { drawHistory(activeAlias); drawSparkline(activeAlias); fillKpis(activeAlias); }
+  if (historyOpen && activeAlias) {
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 });
 btnCSV.addEventListener('click', () => { if(activeAlias) downloadCSV(activeAlias); });
 btnReset.addEventListener('click', () => {
-  if(!activeAlias || !state[activeAlias]) return;
-  state[activeAlias].history = []; saveState(); draw(activeAlias);
-  if(historyOpen){ drawHistory(activeAlias); drawSparkline(activeAlias); fillKpis(activeAlias); }
+  if(!activeAlias) return;
+  if(!state[activeAlias]) return;
+  state[activeAlias].history = [];
+  saveState();
+  draw(activeAlias);
+  if(historyOpen){
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 });
 
 /*** 表單與分頁 ***/
-function toggleAdd(){ const aliasOk = aliasInput.value.trim().length>0; addBtn.disabled = !aliasOk; }
-aliasInput.addEventListener('input', toggleAdd); urlsInput.addEventListener('input', toggleAdd); addBtn.disabled = false;
+function toggleAdd(){
+  const aliasOk = aliasInput.value.trim().length>0;
+  addBtn.disabled = !aliasOk;
+}
+aliasInput.addEventListener('input', toggleAdd);
+urlsInput.addEventListener('input', toggleAdd);
+addBtn.disabled = false;
 
 addBtn.addEventListener('click', () => {
   const alias = aliasInput.value.trim();
@@ -196,12 +246,14 @@ addBtn.addEventListener('click', () => {
   if(!alias){ toast('請輸入別名'); return; }
   if(!urls){ toast('請輸入至少一個活動網址'); return; }
   if(state[alias]){ toast('此別名已存在，請更換'); return; }
-  state[alias] = { urls, freq, last:null, updatedAt:null, history:[], maxHistory: 2000, nextAt: 0, _busy:false };
+  state[alias] = { urls, freq, last:null, updatedAt:null, history:[], maxHistory: 2000 };
   saveState();
-  aliasInput.value=''; addBtn.disabled = true;
-  renderTabs(); setActive(alias);
-  // 立即執行一次並排程
-  runFetch(alias).finally(()=>{ state[alias].nextAt = Date.now() + freqToMs(state[alias].freq); saveState(); });
+  aliasInput.value='';
+  addBtn.disabled = true;
+  renderTabs();
+  setActive(alias);
+  runFetch(alias);
+  setupTimer(alias);   // ✅ 保留自己的輪詢，不會清掉其他 alias
 });
 
 function renderTabs(){
@@ -218,7 +270,11 @@ function renderTabs(){
                    </svg>`;
     t.addEventListener('click', (e)=>{
       const target = e.target.closest('.close');
-      if(target){ removeAlias(target.getAttribute('data-alias')); return; }
+      if(target){
+        const a = target.getAttribute('data-alias');
+        removeAlias(a);
+        return;
+      }
       setActive(name);
     });
     tabsEl.appendChild(t);
@@ -226,15 +282,28 @@ function renderTabs(){
 }
 
 function setActive(name){
-  activeAlias = name; renderTabs(); draw(activeAlias);
-  if(historyOpen){ drawHistory(activeAlias); drawSparkline(activeAlias); fillKpis(activeAlias); }
+  activeAlias = name; renderTabs(); draw(activeAlias); setupTimer(activeAlias); // ✅ 不會影響其它 alias 的計時器
+  if(historyOpen){
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 }
 
 function removeAlias(name){
-  delete state[name]; saveState();
-  const rest = Object.keys(state); activeAlias = rest[0] || null;
-  renderTabs(); draw(activeAlias);
-  if(historyOpen){ drawHistory(activeAlias); drawSparkline(activeAlias); fillKpis(activeAlias); }
+  clearTimer(name);
+  delete inflight[name];
+  delete state[name];
+  saveState();
+  const rest = Object.keys(state);
+  activeAlias = rest[0] || null;
+  renderTabs();
+  draw(activeAlias);
+  if(historyOpen){
+    drawHistory(activeAlias);
+    drawSparkline(activeAlias);
+    fillKpis(activeAlias);
+  }
 }
 
 /*** 視圖繪製 ***/
@@ -242,7 +311,11 @@ function draw(name){
   errEl.textContent='';
   if(!name){ statusEl.textContent='尚未建立任何監測'; tblEl.style.display='none'; return; }
   const item = state[name];
-  if(!item || !item.last){ statusEl.textContent = '尚未抓取'; tblEl.style.display='none'; return; }
+  if(!item || !item.last){
+    statusEl.textContent = '尚未抓取';
+    tblEl.style.display='none';
+    return;
+  }
 
   const data = item.last;
   const ts = item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '';
@@ -250,6 +323,7 @@ function draw(name){
   const { delta, ratePerHour } = summarizeHistory(item.history);
 
   statusEl.textContent = `${name} · 來源：${shorten(item.urls)} · 最後更新：${ts} · 總剩餘：${total} · 與前次差：${fmtDelta(delta)} · 速率：${fmtRate(ratePerHour)}`;
+  
   tbodyEl.innerHTML = '';
   if(!data || !data.results || data.results.length===0){
     tblEl.style.display='none';
@@ -271,73 +345,140 @@ function draw(name){
     });
     tblEl.style.display='';
   }
-  if(data.errors && data.errors.length){ errEl.textContent = data.errors.map(e=>`${e.url||''} ${e.error||e}`).join(' | '); }
+  if(data.errors && data.errors.length){
+    errEl.textContent = data.errors.map(e=>`${e.url||''} ${e.error||e}`).join(' | ');
+  }
 }
 
 function drawHistory(name){
-  const item = state[name]; const hist = (item && item.history) ? item.history : [];
-  const table = document.querySelector('#histTbl'); const tbody = table.querySelector('tbody');
+  const item = state[name];
+  const hist = (item && item.history) ? item.history : [];
+  const table = document.querySelector('#histTbl');
+  const tbody = table.querySelector('tbody');
   tbody.innerHTML = '';
-  if(hist.length === 0){ table.style.display = 'none'; $('#kpiSold24h').textContent='—'; $('#kpiAvgRate').textContent='—'; $('#kpiLastDelta').textContent='—'; $('#sparkMeta').textContent='尚無資料'; const ctx=$('#spark')?.getContext('2d'); if(ctx){ ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);} return; }
+  if(hist.length === 0){
+    table.style.display = 'none';
+    $('#kpiSold24h').textContent = '—';
+    $('#kpiAvgRate').textContent = '—';
+    $('#kpiLastDelta').textContent = '—';
+    $('#sparkMeta').textContent = '尚無資料';
+    const ctx = $('#spark')?.getContext('2d');
+    if(ctx){ ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height); }
+    return;
+  }
   for(let i=0;i<hist.length;i++){
-    const cur = hist[i]; const prev = i>0 ? hist[i-1] : null;
-    const dtHours = prev ? Math.max((cur.ts - prev.ts)/3600000, 1e-6) : null;
+    const cur = hist[i];
+    const prev = i>0 ? hist[i-1] : null;
+    const dtHours = prev ? Math.max( (cur.ts - prev.ts)/3600000, 1e-6 ) : null;
     const delta = prev ? (cur.totalRemain - prev.totalRemain) : null;
-    const rate = (prev && dtHours) ? ((prev.totalRemain - cur.totalRemain) / dtHours) : null;
+    const rate = (prev && dtHours) ? ( (prev.totalRemain - cur.totalRemain) / dtHours ) : null;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(cur.ts).toLocaleString()}</td><td>${cur.totalRemain}</td><td>${prev ? fmtDelta(delta) : '—'}</td><td>${prev ? fmtRate(rate) : '—'}</td>`;
+    tr.innerHTML = `
+      <td>${new Date(cur.ts).toLocaleString()}</td>
+      <td>${cur.totalRemain}</td>
+      <td>${prev ? fmtDelta(delta) : '—'}</td>
+      <td>${prev ? fmtRate(rate) : '—'}</td>
+    `;
     tbody.appendChild(tr);
   }
   table.style.display = '';
 }
 
+/*** Sparkline (近 24h) ***/
 function drawSparkline(name){
-  const item = state[name]; const hist = (item && item.history) ? item.history : [];
-  const canvas = document.getElementById('spark'); if(!canvas) return;
-  const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width, canvas.height);
+  const item = state[name];
+  const hist = (item && item.history) ? item.history : [];
+  const canvas = document.getElementById('spark');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width, canvas.height);
   if(hist.length<2){ $('#sparkMeta').textContent='資料不足'; return; }
+
   const cutoff = Date.now() - 24*3600_000;
   const sub = hist.filter(h => h.ts >= cutoff);
   const used = sub.length>=2 ? sub : hist.slice(-Math.min(hist.length, 30));
   if(used.length<2){ $('#sparkMeta').textContent='資料不足'; return; }
+
   const w = canvas.width, h = canvas.height, pad = 10;
+  const xs = used.map((p,i)=> i);
   const ys = used.map(p => p.totalRemain);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const dx = (w - pad*2) / ((used.length - 1) || 1);
-  const scaleY = (val)=> { if(maxY===minY) return h/2; return h - pad - ((val - minY)/(maxY - minY))*(h - pad*2); };
-  ctx.globalAlpha = 0.5; ctx.strokeStyle = '#232737'; ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad); ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad); ctx.stroke();
-  ctx.font = '11px system-ui, -apple-system, sans-serif'; ctx.fillStyle = '#7f8aa9'; ctx.textAlign = 'left';
-  ctx.fillText(`min ${minY}`, pad+6, scaleY(minY)-4); ctx.fillText(`max ${maxY}`, pad+6, scaleY(maxY)-4); ctx.fillText(`latest ${ys[ys.length-1]}`, pad+6, scaleY(ys[ys.length-1])-4);
-  ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.strokeStyle = '#6ea8fe'; ctx.beginPath();
-  used.forEach((p,i)=>{ const x = pad + i*dx; const y = scaleY(p.totalRemain); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke();
-  const lastX = pad + (used.length-1)*dx; const lastY = scaleY(used[used.length-1].totalRemain);
-  ctx.fillStyle = '#6ea8fe'; ctx.beginPath(); ctx.arc(lastX,lastY,3,0,Math.PI*2); ctx.fill();
-  const spanHrs = (used[used.length-1].ts - used[0].ts)/3600000; $('#sparkMeta').textContent = `樣本數：${used.length} · 覆蓋時長：約 ${spanHrs.toFixed(2)} 小時`;
+  const dx = (w - pad*2) / (xs.length - 1 || 1);
+  const scaleY = (val)=> {
+    if(maxY===minY) return h/2;
+    return h - pad - ( (val - minY) / (maxY - minY) ) * (h - pad*2);
+  };
+
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = '#232737';
+  ctx.beginPath();
+  ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad);
+  ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad);
+  ctx.stroke();
+
+  ctx.font = '11px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = '#7f8aa9';
+  ctx.textAlign = 'left';
+  ctx.fillText(`min ${minY}`, pad+6, scaleY(minY)-4);
+  ctx.fillText(`max ${maxY}`, pad+6, scaleY(maxY)-4);
+  ctx.fillText(`latest ${ys[ys.length-1]}`, pad+6, scaleY(ys[ys.length-1])-4);
+
+  ctx.globalAlpha = 1;
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#6ea8fe';
+  ctx.beginPath();
+  used.forEach((p,i)=>{
+    const x = pad + i*dx;
+    const y = scaleY(p.totalRemain);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  const lastX = pad + (used.length-1)*dx;
+  const lastY = scaleY(used[used.length-1].totalRemain);
+  ctx.fillStyle = '#6ea8fe';
+  ctx.beginPath(); ctx.arc(lastX,lastY,3,0,Math.PI*2); ctx.fill();
+
+  const spanHrs = (used[used.length-1].ts - used[0].ts)/3600000;
+  $('#sparkMeta').textContent = `樣本數：${used.length} · 覆蓋時長：約 ${spanHrs.toFixed(2)} 小時`;
 }
 
+/*** KPI 填值 ***/
 function fillKpis(name){
-  const item = state[name]; const hist = (item && item.history) ? item.history : [];
-  const { sold24h, avgRate24h } = calc24h(hist); const { delta } = summarizeHistory(hist);
+  const item = state[name];
+  const hist = (item && item.history) ? item.history : [];
+  const { sold24h, avgRate24h } = calc24h(hist);
+  const { delta } = summarizeHistory(hist);
+
   $('#kpiSold24h').textContent = sold24h===null ? '—' : `${sold24h}`;
   $('#kpiAvgRate').textContent = avgRate24h===null ? '—' : avgRate24h.toFixed(2);
   $('#kpiLastDelta').textContent = delta===null ? '—' : fmtDelta(delta);
 }
 
-/*** 抓取（加入 timeout 與錯誤緩解） ***/
+/*** 抓取與輪詢 ***/
 async function runFetch(name){
-  const item = state[name]; if(!item) return;
-  const isActive = (name===activeAlias);
-  if(isActive){ errEl.textContent=''; statusEl.textContent = `正在抓取（${name}）…`; liveDot.style.background = '#f59e0b'; }
+  const item = state[name];
+  if(!item) return;
+
+  // ❗ 併發保護：若同一 alias 尚有請求在跑，就跳過這次
+  if (inflight[name]) return;
+  inflight[name] = true;
+
+  if(name===activeAlias){
+    errEl.textContent='';
+    statusEl.textContent = `正在抓取（${name}）…`;
+    liveDot.style.background = '#f59e0b';
+  }
   try{
     const target = item.urls.includes(',') ? `${API}?urls=${encodeURIComponent(item.urls)}` : `${API}?url=${encodeURIComponent(item.urls)}`;
-    const ctrl = new AbortController();
-    const t = setTimeout(()=> ctrl.abort(), 25000); // 25s timeout
-    const res = await fetch(target, { cache:'no-store', signal: ctrl.signal, keepalive: true });
-    clearTimeout(t);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(target, { cache:'no-store' });
     const data = await res.json();
 
-    item.last = data; item.updatedAt = Date.now();
+    // 更新 last 與 updatedAt
+    item.last = data; 
+    item.updatedAt = Date.now();
+
+    // 寫入歷史點
     const total = calcTotalRemain(data);
     if(!item.history) item.history = [];
     item.history.push({ ts: item.updatedAt, totalRemain: total });
@@ -345,72 +486,184 @@ async function runFetch(name){
     if(item.history.length > cap) item.history = item.history.slice(-cap);
 
     saveState();
-    if(isActive){ draw(name); if(historyOpen){ drawHistory(name); drawSparkline(name); fillKpis(name);} liveDot.style.background = '#22c55e'; }
-  }catch(e){
-    if(isActive){
-      const aborted = (e && (e.name === 'AbortError'));
-      errEl.textContent = '讀取失敗：' + (aborted ? '逾時或連線被中斷（已自動重試排程）' : e);
-      statusEl.textContent = '讀取失敗'; liveDot.style.background = '#ef4444';
+    if(name===activeAlias) {
+      draw(name);
+      if(historyOpen){
+        drawHistory(name);
+        drawSparkline(name);
+        fillKpis(name);
+      }
+      liveDot.style.background = '#22c55e';
     }
+  }catch(e){
+    if(name===activeAlias){
+      errEl.textContent = '讀取失敗：' + e;
+      statusEl.textContent = '讀取失敗';
+      liveDot.style.background = '#ef4444';
+    }
+  } finally {
+    inflight[name] = false;
   }
 }
 
-/*** 單一排程器（所有 alias 共用）；避免切換分頁時中止 ***/
-const TICK_MS = 5000; // 檢查是否到期的節拍；不代表實際頻率
-setInterval(() => {
-  const now = Date.now();
-  for(const [name, item] of Object.entries(state)){
-    if(!item.nextAt) item.nextAt = 0;
-    if(item._busy) continue; // 避免重入
-    if(now >= item.nextAt){
-      item._busy = true;
-      runFetch(name).finally(() => {
-        item._busy = false;
-        const ms = freqToMs(item.freq); item.nextAt = Date.now() + ms; saveState();
-      });
-    }
-  }
-}, TICK_MS);
+function setupTimer(name){
+  // ✅ 只清掉自己的舊 interval，不會把其他 alias 的 timer 全部清掉
+  if (timers[name]) clearInterval(timers[name]);
+  const item = state[name]; if(!item) return;
+  const ms = freqToMs(item.freq);
+  timers[name] = setInterval(()=> runFetch(name), ms);
+}
 
-// 手動「立即更新」只更新當前顯示的 alias，且重設該 alias 的下一次排程
-$('#refresh').addEventListener('click', () => {
-  if(!activeAlias) return; const item = state[activeAlias]; if(!item) return;
-  item.nextAt = 0; saveState();
-  runFetch(activeAlias).finally(()=>{ item.nextAt = Date.now() + freqToMs(item.freq); saveState(); });
-});
+function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
 
 /*** 計算與工具 ***/
-function labelOfFreq(v){ return v==='10m'?'每 10 分鐘' : v==='1h' ? '每 1 小時' : v==='6h' ? '每 6 小時' : '每天'; }
-function freqToMs(v){ return v==='10m' ? 10*60_000 : v==='1h' ? 3600_000 : v==='6h' ? 6*3600_000 : 24*3600_000; }
+function labelOfFreq(v){ 
+  return v==='10m'?'每 10 分鐘'
+       : v==='1h' ? '每 1 小時'
+       : v==='6h' ? '每 6 小時'
+       : '每天';
+}
+function freqToMs(v){ 
+  return v==='10m' ? 10*60_000
+       : v==='1h'  ? 3600_000
+       : v==='6h'  ? 6*3600_000
+       : 24*3600_000; 
+}
 function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
 function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
 function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
-function parseRemain(val){ if(val == null) return 0; const n = String(val).replace(/[^\d]/g,''); return n ? parseInt(n,10) : 0; }
-function calcTotalRemain(data){ if(!data || !data.results) return 0; let sum=0; for(const r of data.results){ if(!r.entries) continue; for(const e of r.entries){ sum += parseRemain(e.remaining);} } return sum; }
-function summarizeHistory(hist){ if(!hist || hist.length<2) return { delta:null, ratePerHour:null }; const cur = hist[hist.length-1]; const prev = hist[hist.length-2]; const delta = cur.totalRemain - prev.totalRemain; const dtH = Math.max((cur.ts - prev.ts)/3600000, 1e-6); const rate = (prev.totalRemain - cur.totalRemain)/dtH; return { delta, ratePerHour: rate }; }
-function fmtDelta(d){ if(d===null || d===undefined) return '—'; if(d===0) return '0'; return d<0 ? `售出 ${-d} 張` : `增加 ${d} 張`; }
-function fmtRate(r){ if(r===null || r===undefined || isNaN(r)) return '—'; return r.toFixed(2); }
-function calc24h(hist){ if(!hist || hist.length<2) return { sold24h:null, avgRate24h:null }; const cutoff=Date.now()-24*3600_000; const sub=hist.filter(h=>h.ts>=cutoff); const used=sub.length>=2?sub:hist.slice(-Math.min(hist.length,30)); if(used.length<2) return { sold24h:null, avgRate24h:null }; const sold = used[0].totalRemain - used[used.length-1].totalRemain; const hours = Math.max((used[used.length-1].ts - used[0].ts)/3600000,1e-6); return { sold24h:sold, avgRate24h:sold/hours } }
+
+function parseRemain(val){
+  if(val == null) return 0;
+  const n = String(val).replace(/[^\d]/g,'');
+  return n ? parseInt(n,10) : 0;
+}
+function calcTotalRemain(data){
+  if(!data || !data.results) return 0;
+  let sum = 0;
+  for(const r of data.results){
+    if(!r.entries) continue;
+    for(const e of r.entries){ sum += parseRemain(e.remaining); }
+  }
+  return sum;
+}
+function summarizeHistory(hist){
+  if(!hist || hist.length<2) return { delta: null, ratePerHour: null };
+  const cur = hist[hist.length-1];
+  const prev = hist[hist.length-2];
+  const delta = cur.totalRemain - prev.totalRemain;
+  const dtH = Math.max((cur.ts - prev.ts)/3600000, 1e-6);
+  const rate = (prev.totalRemain - cur.totalRemain) / dtH;
+  return { delta, ratePerHour: rate };
+}
+function fmtDelta(d){
+  if(d===null || d===undefined) return '—';
+  if(d===0) return '0';
+  return d<0 ? `售出 ${-d} 張` : `增加 ${d} 張`;
+}
+function fmtRate(r){
+  if(r===null || r===undefined || isNaN(r)) return '—';
+  return r.toFixed(2);
+}
+function calc24h(hist){
+  if(!hist || hist.length<2) return { sold24h: null, avgRate24h: null };
+  const cutoff = Date.now() - 24*3600_000;
+  const sub = hist.filter(h => h.ts >= cutoff);
+  const used = sub.length>=2 ? sub : hist.slice(-Math.min(hist.length, 30));
+  if(used.length<2) return { sold24h: null, avgRate24h: null };
+  const sold = used[0].totalRemain - used[used.length-1].totalRemain;
+  const hours = Math.max((used[used.length-1].ts - used[0].ts)/3600000, 1e-6);
+  return { sold24h: sold, avgRate24h: sold/hours };
+}
+
+/*** 匯出 CSV ***/
+function downloadCSV(name){
+  const item = state[name];
+  const hist = (item && item.history) ? item.history : [];
+  if(hist.length===0){ toast('尚無歷史資料'); return; }
+  const rows = [['alias','timestamp','time_local','total_remain','delta_vs_prev','rate_per_hour']];
+  for(let i=0;i<hist.length;i++){
+    const cur = hist[i], prev = i>0 ? hist[i-1] : null;
+    const dtH = prev ? Math.max((cur.ts - prev.ts)/3600000, 1e-6) : null;
+    const delta = prev ? (cur.totalRemain - prev.totalRemain) : null;
+    const rate = (prev && dtH) ? ( (prev.totalRemain - cur.totalRemain)/dtH ) : null;
+    rows.push([
+      name,
+      cur.ts,
+      new Date(cur.ts).toLocaleString(),
+      cur.totalRemain,
+      (delta===null? '' : delta),
+      (rate===null? '' : rate.toFixed(4))
+    ]);
+  }
+  const csv = rows.map(r=>r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${name}-opentix-history.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /*** 儲存/載入 ***/
 function saveState(){ localStorage.setItem('opentix_watch_state', JSON.stringify(state)); }
-function loadState(){ try{ const obj = JSON.parse(localStorage.getItem('opentix_watch_state')||'{}'); for(const k of Object.keys(obj)){ obj[k].history = obj[k].history || []; obj[k].maxHistory = obj[k].maxHistory || 2000; obj[k].nextAt = obj[k].nextAt || 0; obj[k]._busy = false; } return obj; }catch{ return {} } }
+function loadState(){ 
+  try{ 
+    const obj = JSON.parse(localStorage.getItem('opentix_watch_state')||'{}');
+    for(const k of Object.keys(obj)){
+      obj[k].history = obj[k].history || [];
+      obj[k].maxHistory = obj[k].maxHistory || 2000;
+    }
+    return obj;
+  }catch{ return {} } 
+}
 
-/*** 初始渲染 ***/
-renderTabs(); draw(activeAlias);
-// 初始化：所有 alias 的 nextAt 設為 0，讓排程器接手
-for(const k of Object.keys(state)){ if(!state[k].nextAt) state[k].nextAt = 0; }
-saveState();
+/*** 初始渲染與手動更新 ***/
+renderTabs();
+draw(activeAlias);
+
+// ✅ 啟動所有 alias 的輪詢，而且不會因切換分頁而停止
+Object.keys(state).forEach(setupTimer);
+
+// ✅ 逐一（錯開一點點）進行一次立即抓取，避免同時大量併發
+Object.keys(state).forEach((name, i) => setTimeout(() => runFetch(name), i * 400));
+
+// 手動「立即更新」只更新當前顯示的 alias
+btnRefresh.addEventListener('click', () => { if (activeAlias) runFetch(activeAlias); });
 
 /*** 線上人數/心跳（IIFE） ***/
 ;(function(){
   const badge = document.getElementById("onlineBadge");
   const cidKey = "client_id";
   let cid = localStorage.getItem(cidKey);
-  if (!cid) { cid = (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random())); localStorage.setItem(cidKey, cid); }
-  async function ping(){ try{ await fetch(`${API_BASE}/heartbeat`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({client_id: cid}) }); }catch(_){}}
-  async function refreshCount(){ try{ const r = await fetch(`${API_BASE}/online_count`); const d = await r.json(); badge.textContent = `線上 ${d.count} 人`; badge.style.color = (d.count > 2) ? "var(--err)" : "var(--muted)"; }catch(_){ badge.textContent = "線上 N/A"; badge.style.color = "var(--muted)"; } }
-  ping(); refreshCount(); setInterval(ping, 20000); setInterval(refreshCount, 20000);
+  if (!cid) {
+    cid = (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+    localStorage.setItem(cidKey, cid);
+  }
+
+  async function ping(){
+    try{
+      await fetch(`${API_BASE}/heartbeat`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({client_id: cid})
+      });
+    }catch(_){/* ignore */}
+  }
+  async function refreshCount(){
+    try{
+      const r = await fetch(`${API_BASE}/online_count`);
+      const d = await r.json();
+      badge.textContent = `線上 ${d.count} 人`;
+      badge.style.color = (d.count > 2) ? "var(--err)" : "var(--muted)";
+    }catch(_){
+      badge.textContent = "線上 N/A";
+      badge.style.color = "var(--muted)";
+    }
+  }
+  ping(); refreshCount();
+  setInterval(ping, 20000);
+  setInterval(refreshCount, 20000);
 })();
 </script>
 
