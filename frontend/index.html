@@ -520,12 +520,17 @@ async function runFetch(name){
 }
 
 function setupTimer(name){
-  // 僅保留當前分頁的輪詢
-  Object.keys(timers).forEach(clearTimer);
-  const item = state[name]; if(!item) return;
+  // 如果這個 alias 已經有舊的 timer，先清掉
+  if (timers[name]) clearInterval(timers[name]);
+
+  const item = state[name];
+  if (!item) return;
   const ms = freqToMs(item.freq);
+
+  // 幫這個 alias 新增一個專屬的 timer
   timers[name] = setInterval(()=> runFetch(name), ms);
 }
+
 function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
 
 /*** 計算與工具 ***/
