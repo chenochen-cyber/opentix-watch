@@ -642,21 +642,14 @@ function loadState(){
 renderTabs();
 draw(activeAlias);
 
-// 同時幫所有 alias 啟動輪詢（原本只啟動 activeAlias）
+// 同時幫所有 alias 啟動輪詢
 Object.keys(state).forEach(setupTimer);
 
 // 手動「立即更新」只更新當前顯示的 alias
 document.getElementById('refresh').addEventListener('click', () => {
   if (activeAlias) runFetch(activeAlias);
 });
-(function(){
-  const badge = document.getElementById("onlineBadge");
-  const cidKey = "client_id";
-  let cid = localStorage.getItem(cidKey);
-  if (!cid) {
-    cid = (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
-    localStorage.setItem(cidKey, cid);
-  }
+
 
   async function ping(){
     try{
