@@ -270,6 +270,7 @@ addBtn.addEventListener('click', () => {
   addBtn.disabled = true;
   renderTabs();
   setActive(alias);
+  runFetch(alias);
 
 // 立刻跑一次 & 啟動它自己的輪詢
 runFetch(alias);
