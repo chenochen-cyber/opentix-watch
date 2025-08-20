@@ -271,10 +271,7 @@ addBtn.addEventListener('click', () => {
   renderTabs();
   setActive(alias);
   runFetch(alias);
-
-// 立刻跑一次 & 啟動它自己的輪詢
-runFetch(alias);
-setupTimer(alias);
+  setupTimer(alias);   // 啟動它的定時輪詢
 });
 
 function renderTabs(){
@@ -524,15 +521,11 @@ async function runFetch(name){
 }
 
 function setupTimer(name){
-  // 如果這個 alias 已經有舊的 timer，先清掉
-  if (timers[name]) clearInterval(timers[name]);
-
-  const item = state[name];
+  if (timers[name]) clearInterval(timers[name]); // 只清自己的
+  const item = state[name]; 
   if (!item) return;
   const ms = freqToMs(item.freq);
-
-  // 幫這個 alias 新增一個專屬的 timer
-  timers[name] = setInterval(()=> runFetch(name), ms);
+  timers[name] = setInterval(() => runFetch(name), ms);
 }
 
 function clearTimer(name){ if(timers[name]){ clearInterval(timers[name]); delete timers[name]; } }
@@ -647,10 +640,16 @@ function loadState(){
 }
 
 /*** 初始渲染與手動更新 ***/
-renderTabs(); draw(activeAlias);
-if(activeAlias){ setupTimer(activeAlias); }
-document.getElementById('refresh').addEventListener('click', () => { if(activeAlias) runFetch(activeAlias); });
+renderTabs();
+draw(activeAlias);
 
+// 同時幫所有 alias 啟動輪詢（原本只啟動 activeAlias）
+Object.keys(state).forEach(setupTimer);
+
+// 手動「立即更新」只更新當前顯示的 alias
+document.getElementById('refresh').addEventListener('click', () => {
+  if (activeAlias) runFetch(activeAlias);
+});
 (function(){
   const badge = document.getElementById("onlineBadge");
   const cidKey = "client_id";
