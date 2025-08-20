@@ -313,14 +313,16 @@ function removeAlias(name){
   saveState();
   const rest = Object.keys(state);
   activeAlias = rest[0] || null;
-  renderTabs();
-  draw(activeAlias);
-  if(historyOpen){
-    drawHistory(activeAlias);
-    drawSparkline(activeAlias);
-    fillKpis(activeAlias);
-  }
-}
+  renderTabs(); 
+draw(activeAlias);
+
+// 原本：if(activeAlias){ setupTimer(activeAlias); }
+// 改成：
+Object.keys(state).forEach(setupTimer);
+
+document.getElementById('refresh').addEventListener('click', () => { 
+  if (activeAlias) runFetch(activeAlias); 
+});
 
 /*** 視圖繪製 ***/
 function draw(name){
