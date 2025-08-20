@@ -544,7 +544,7 @@ function freqToMs(v){
 }
 function shorten(s){ return s.length>60? s.slice(0,57)+'…' : s; }
 function toast(msg){ statusEl.textContent = msg; setTimeout(()=>{ if(activeAlias){ draw(activeAlias); } else { statusEl.textContent=''; } }, 1400); }
-function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;"," >":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
 function parseRemain(val){
   // 將「剩：123」「剩餘123」「123張」等字樣轉成整數
