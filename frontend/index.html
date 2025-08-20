@@ -575,8 +575,8 @@ function fmtDelta(d){
   if(d===null || d===undefined) return '—';
   if(d===0) return '0';
   return d<0 
-    ? `距離前次觀測期間售出 ${-d} 張`
-    : `距離前次觀測期間增加 ${d} 張`;
+    ? `售出 ${-d} 張`
+    : `增加 ${d} 張`;
 }
 function fmtRate(r){
   if(r===null || r===undefined || isNaN(r)) return '—';
